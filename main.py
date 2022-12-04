@@ -16,6 +16,9 @@ broadcast_port = 10001
 #chat sockets
 chat_server_socket, chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) , socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 chat_port = 10002
+#info sockets TCP
+info_server_socket, info_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) , socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+info_port = 10003
 
 server_address = IPAddr #'127.0.0.1'
 
@@ -73,15 +76,51 @@ def join_chat():
 def listen_for_participants():
     broadcast_server_socket.bind(('', broadcast_port))
     while True:
+        global participants
         new_participant, address = broadcast_server_socket.recvfrom(buffer_size)
         new_participant = decode_data(new_participant)
         if not (new_participant in participants):
             participants.append(new_participant)
+            participants = sort_participants(participants)
             print(participants)
+            neighbour = get_neighbour(participants, client_id)
+            info_client_socket.connect((neighbour['ip'], info_port))
+            data = {
+                "participants": participants
+            }
+            info_client_socket.sendall(encode_data(data))
+            info_client_socket.close()
 
 #-------------------------------------------------------------------------------------------------------
 
-# send messages 
+
+
+
+
+def listen_for_info():
+    global participants
+    info_server_socket.bind(('', info_port))
+    info_server_socket.listen(1)
+    conn, addr = info_server_socket.accept()
+    while True:
+        try:
+            data = conn.recv(buffer_size)
+
+            if not data: break
+
+            decoded_data = decode_data(data)
+            print(decoded_data)
+            participants = decoded_data["participants"]
+
+        except socket.error:
+            print("Error Occured.") 
+            break
+
+    conn.close()
+
+#-------------------------------------------------------------------------------------------------------
+
+# send chat messages 
 
 def receive_messages():
     chat_server_socket.bind((server_address, chat_port))
@@ -106,6 +145,7 @@ if __name__ == '__main__':
     Thread(target=listen_for_participants).start()
     Thread(target=receive_messages).start()
     Thread(target=send_messages).start()
+    Thread(target=listen_for_info).start()
     print("server Running")
 
     print("Your Computer Name is: "+hostname)
