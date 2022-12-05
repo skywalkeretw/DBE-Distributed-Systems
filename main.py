@@ -1,6 +1,6 @@
 
 import socket
-from threading import Thread
+from threading import Thread, Condition
 from multiprocessing import Process
 import os
 from uuid import uuid4
@@ -24,6 +24,8 @@ server_address = IPAddr #'127.0.0.1'
 
 buffer_size = 4069
 client_id = str(uuid4())
+
+c = Condition()
 participants = []
 participant_data = {
         "id": client_id,
@@ -46,15 +48,23 @@ def run_CMD(cmd_msg):
         print("> ", IPAddr)
     elif cmd == "participants":
         print("> ", participants)
+    elif cmd == "neighbour":
+        print("> ", get_neighbour(participants, client_id))
 
 def sort_participants(participants):
     return sorted(participants, key=lambda d: d['id'])
 
-def get_index_of_participant(uid):
+def get_index_of_participant_id(uid):
     return next((index for (index, d) in enumerate(participants) if d["id"] == uid), -1)
 
+def get_index_of_participant_ip(ip):
+    return next((index for (index, d) in enumerate(participants) if d["ip"] == ip), -1)
+
+def get_index_of_participant_uid_id(uid, ip):
+    return next((index for (index, d) in enumerate(participants) if d["id"] == uid and d["ip"] == ip), -1)
+
 def get_neighbour(ring, uid, direction='left'):
-    current_index = get_index_of_participant(uid)
+    current_index = get_index_of_participant_id(uid)
     if current_index != -1:
         if direction == 'left':
             if current_index + 1 == len(ring):
@@ -93,11 +103,14 @@ def listen_for_participants():
             new_participant, address = broadcast_server_socket.recvfrom(buffer_size)
             new_participant = decode_data(new_participant)
             if not (new_participant in participants):
+                c.acquire()
                 participants.append(new_participant)
                 participants = sort_participants(participants)
-                print(participants)
+                c.notify_all()
+                c.release()
                 
                 neighbour = get_neighbour(participants, client_id)
+
                 #check if connection can be established to the neigbour
                 try:
                     info_client_socket.connect((neighbour['ip'], info_port))
@@ -106,11 +119,16 @@ def listen_for_participants():
                     }
                     info_client_socket.sendall(encode_data(data))
                     info_client_socket.close()
+
                 except socket.error:
                     print("Cant Send To Neigbourg") 
-                    del participants[get_index_of_participant(neighbour["id"])]
+                    
+                    c.acquire()
+                    del participants[get_index_of_participant_id(neighbour["id"])]
                     participants = sort_participants(participants)
-                    print(participants)
+                    c.notify_all()
+                    c.release()
+
                     neighbour = get_neighbour(participants, client_id)
                     info_client_socket.connect((neighbour['ip'], info_port))
                     data = {
@@ -132,6 +150,7 @@ def listen_for_participants():
 
 def listen_for_info():
     global participants
+
     info_server_socket.bind(('', info_port))
     info_server_socket.listen(1)
     conn, addr = info_server_socket.accept()
@@ -143,27 +162,34 @@ def listen_for_info():
 
             decoded_data = decode_data(data)
             print(decoded_data)
+            c.acquire()
             participants = decoded_data["participants"]
+            c.notify_all()
+            c.release()
             neighbour = get_neighbour(participants, client_id)
             print(neighbour)
 
         except socket.error:
-            print("Error Occured.") 
+            print("Error Occured Listening for info.") 
             break
 
     conn.close()
 
 #-------------------------------------------------------------------------------------------------------
 
-# send chat messages 
+# send chat messages as multicast
 
 def receive_messages():
     chat_server_socket.bind((server_address, chat_port))
     
     while True:
-        data, address = chat_server_socket.recvfrom(buffer_size)
-        decoded_data = decode_data(data)
-        print(f'{address[0]}: {decoded_data["message"]}' )
+        try:
+            data, address = chat_server_socket.recvfrom(buffer_size)
+            decoded_data = decode_data(data)
+            print(f'{address[0]}: {decoded_data["message"]}' )
+        except socket.error:
+            print('Exception ')
+
 
 
 def send_messages():
