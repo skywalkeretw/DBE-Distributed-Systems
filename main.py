@@ -211,9 +211,6 @@ def send_messages():
 
             # Create the datagram socket
             chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Set a timeout so the socket does not block indefinitely when trying
-            # to receive data.
-            chat_client_socket.settimeout(0.2)
 
             # Set the time-to-live for messages to 1 so they do not go past the
             # local network segment.
