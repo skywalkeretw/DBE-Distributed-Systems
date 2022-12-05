@@ -14,7 +14,7 @@ IPAddr=socket.gethostbyname(socket.gethostname()+'.')
 broadcast_server_socket, broadcast_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) , socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 broadcast_port = 10001
 #chat sockets
-chat_server_socket, chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) , socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+chat_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 chat_port = 10002
 #info sockets TCP
 info_server_socket, info_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) , socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,11 +39,22 @@ def encode_data(d):
 def decode_data(d):
     return json.loads(d.decode('utf-8'))
 
+def run_CMD(cmd_msg):
+    cmd = cmd_msg.split(":")[1]
+    
+    if cmd == "ip":
+        print("> ", IPAddr)
+    elif cmd == "participants":
+        print("> ", participants)
+
 def sort_participants(participants):
     return sorted(participants, key=lambda d: d['id'])
 
+def get_index_of_participant(uid):
+    return next((index for (index, d) in enumerate(participants) if d["id"] == uid), -1)
+
 def get_neighbour(ring, uid, direction='left'):
-    current_index = next((index for (index, d) in enumerate(participants) if d["id"] == uid), None)
+    current_index = get_index_of_participant(uid)
     if current_index != -1:
         if direction == 'left':
             if current_index + 1 == len(ring):
@@ -57,6 +68,7 @@ def get_neighbour(ring, uid, direction='left'):
                 return ring[current_index -1]
     else:
         return None
+
 
 # print(get_neighbour(participants,"14ede406-ccde-48f4-b05d-62cae9fd0bda"))
 
@@ -76,20 +88,41 @@ def join_chat():
 def listen_for_participants():
     broadcast_server_socket.bind(('', broadcast_port))
     while True:
-        global participants
-        new_participant, address = broadcast_server_socket.recvfrom(buffer_size)
-        new_participant = decode_data(new_participant)
-        if not (new_participant in participants):
-            participants.append(new_participant)
-            participants = sort_participants(participants)
-            print(participants)
-            neighbour = get_neighbour(participants, client_id)
-            info_client_socket.connect((neighbour['ip'], info_port))
-            data = {
-                "participants": participants
-            }
-            info_client_socket.sendall(encode_data(data))
-            info_client_socket.close()
+        try:
+            global participants
+            new_participant, address = broadcast_server_socket.recvfrom(buffer_size)
+            new_participant = decode_data(new_participant)
+            if not (new_participant in participants):
+                participants.append(new_participant)
+                participants = sort_participants(participants)
+                print(participants)
+                
+                neighbour = get_neighbour(participants, client_id)
+                #check if connection can be established to the neigbour
+                try:
+                    info_client_socket.connect((neighbour['ip'], info_port))
+                    data = {
+                        "participants": participants
+                    }
+                    info_client_socket.sendall(encode_data(data))
+                    info_client_socket.close()
+                except socket.error:
+                    print("Cant Send To Neigbourg") 
+                    del participants[get_index_of_participant(neighbour["id"])]
+                    participants = sort_participants(participants)
+                    print(participants)
+                    neighbour = get_neighbour(participants, client_id)
+                    info_client_socket.connect((neighbour['ip'], info_port))
+                    data = {
+                        "participants": participants
+                    }
+                    info_client_socket.sendall(encode_data(data))
+                    info_client_socket.close()
+                    
+
+        except socket.error:
+            print("Error Occured.") 
+            break
 
 #-------------------------------------------------------------------------------------------------------
 
@@ -111,6 +144,8 @@ def listen_for_info():
             decoded_data = decode_data(data)
             print(decoded_data)
             participants = decoded_data["participants"]
+            neighbour = get_neighbour(participants, client_id)
+            print(neighbour)
 
         except socket.error:
             print("Error Occured.") 
@@ -127,27 +162,53 @@ def receive_messages():
     
     while True:
         data, address = chat_server_socket.recvfrom(buffer_size)
-        print(f"{address[0]}: {data.decode()}" )
+        decoded_data = decode_data(data)
+        print(f'{address[0]}: {decoded_data["message"]}' )
+
 
 def send_messages():
     while True:
         msg = input()
-        for participant in participants:
-            if participant["ip"] != IPAddr:
-                chat_client_socket.sendto(msg.encode(), (participant["ip"], chat_port))
+
+        is_CMD = msg.startswith("cmd:")
+        if is_CMD:
+            run_CMD(msg)
+        else:
+            data = {
+                "message": msg
+            }
+            for participant in participants:
+                if participant["ip"] != IPAddr:
+                    chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    chat_client_socket.sendto(encode_data(data), (participant["ip"], chat_port))
+                
+
+
 
 #-------------------------------------------------------------------------------------------------------
 
 
 if __name__ == '__main__':
-    participants.append(participant_data)
-    join_chat()
-    Thread(target=listen_for_participants).start()
-    Thread(target=receive_messages).start()
-    Thread(target=send_messages).start()
-    Thread(target=listen_for_info).start()
-    print("server Running")
-
     print("Your Computer Name is: "+hostname)
     print("Your Computer IP Address is: "+IPAddr)
+    participants.append(participant_data)
+    join_chat()
+
+    # Thread That listen for Broadcast messages with new participants
+    t_listen_for_participants = Thread(target=listen_for_participants, args=(), daemon=False)
+    t_listen_for_participants.start()
+
+    # Thread that listens for incoming messages
+    t_receive_messages = Thread(target=receive_messages, args=(), daemon=False)
+    t_receive_messages.start()
+    
+    # Thread That Sends Messages 
+    t_send_messages = Thread(target=send_messages, args=(), daemon=False)
+    t_send_messages.start()
+    
+    t_listen_for_info = Thread(target=listen_for_info, args=(), daemon=False)
+    t_listen_for_info.start()
+    
+
+
 
