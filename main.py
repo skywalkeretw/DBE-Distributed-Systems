@@ -5,6 +5,7 @@ from multiprocessing import Process
 import os
 from uuid import uuid4
 import json
+import struct
 
 hostname=socket.gethostname()
 IPAddr=socket.gethostbyname(socket.gethostname()+'.')
@@ -15,6 +16,7 @@ broadcast_server_socket, broadcast_client_socket = socket.socket(socket.AF_INET,
 broadcast_port = 10001
 #chat sockets
 chat_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+chat_address = '224.42.69.7'
 chat_port = 10002
 #info sockets TCP
 info_server_socket, info_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) , socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -180,15 +182,18 @@ def listen_for_info():
 # send chat messages as multicast
 
 def receive_messages():
-    chat_server_socket.bind((server_address, chat_port))
+    chat_server_socket.bind(('', chat_port))
     
+    # Tell the operating system to add the socket to the multicast group
+    # on all interfaces.
+    group = socket.inet_aton(chat_address)
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    chat_server_socket.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
     while True:
-        try:
-            data, address = chat_server_socket.recvfrom(buffer_size)
-            decoded_data = decode_data(data)
-            print(f'{address[0]}: {decoded_data["message"]}' )
-        except socket.error:
-            print('Exception ')
+        data, address = chat_server_socket.recvfrom(1024)
+        decoded_data = decode_data(data)
+        print(f'{address[0]}: {decoded_data["message"]}' )
 
 
 
@@ -203,10 +208,25 @@ def send_messages():
             data = {
                 "message": msg
             }
-            for participant in participants:
-                if participant["ip"] != IPAddr:
-                    chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    chat_client_socket.sendto(encode_data(data), (participant["ip"], chat_port))
+
+            # Create the datagram socket
+            chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Set a timeout so the socket does not block indefinitely when trying
+            # to receive data.
+            chat_client_socket.settimeout(0.2)
+
+            # Set the time-to-live for messages to 1 so they do not go past the
+            # local network segment.
+            ttl = struct.pack('b', 1)
+            chat_client_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+
+            try:
+
+                # Send data to the multicast group
+                chat_client_socket.sendto(encode_data(data), (chat_address, chat_port))
+
+            finally:
+                chat_client_socket.close()
                 
 
 
