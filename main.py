@@ -11,6 +11,11 @@ hostname=socket.gethostname()
 IPAddr=socket.gethostbyname(socket.gethostname()+'.')
 
 
+# UDP : socket.SOCK_DGRAM
+# 
+# TCP : socket.SOCK_STREAM
+# 
+
 # broadcast sockets
 broadcast_server_socket, broadcast_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) , socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 broadcast_port = 10001
@@ -28,7 +33,8 @@ buffer_size = 4069
 client_id = str(uuid4())
 
 c = Condition()
-participants = []
+participants = [] # liste mit dict
+
 participant_data = {
         "id": client_id,
         "ip": IPAddr
