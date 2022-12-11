@@ -36,3 +36,14 @@
 ```bash
     git push origin <branchname>
 ```
+
+### view branch
+```bash
+    git branch
+```
+use q to quit
+
+### delete branch
+```bash
+    git branch -D
+```
