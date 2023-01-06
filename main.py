@@ -129,14 +129,14 @@ def listen_for_participants():
                     info_client_socket.close()
 
                 except socket.error:
-                    print("Cant Send To Neigbourg") 
+                    print("Cant Send To Neighbour") 
                     
                     c.acquire()
                     del participants[get_index_of_participant_id(neighbour["id"])]
                     participants = sort_participants(participants)
                     c.notify_all()
                     c.release()
-
+                    # Schleife notwendig ansonsten Problem wenn 2. Nachbar auch nicht gefunden wird? 
                     neighbour = get_neighbour(participants, client_id)
                     info_client_socket.connect((neighbour['ip'], info_port))
                     data = {
