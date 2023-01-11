@@ -14,6 +14,7 @@ IPAddr=socket.gethostbyname(socket.gethostname()+'.')
 buffer_size = 4069
 is_leader = False
 my_uuid = ""
+my_name = ""
 
 participants_ring = [] # list of ids: 33c76fe6-5c39-46a4-885c-1b770a6e786e
 participants_list = {} # dictionary containing data about the participants
@@ -48,10 +49,15 @@ def run_CMD(cmd_msg):
     
     if cmd == "ip":
         print("> ", IPAddr)
-    elif cmd == "participants":
-        print("> ", participants_ring)
+    elif cmd == "participants_ring":
+        print("> ", participants_ring)        
+    elif cmd == "participants_list":
+        print("> ", participants_list)
     elif cmd == "neighbour":
-        print("> ", get_neighbour(participants_ring, my_id))
+        print("> ", get_neighbour(participants_ring, my_uuid))
+    elif cmd == "is_leader":
+        print(f"> Is Leader: {is_leader}")
+    
 
 #-------------------------------------------------------------------------------------------------------
 
@@ -83,12 +89,19 @@ def get_neighbour(ring, current_node_ip, direction='left'):
 # Broadcast to Join the chat
 
 def join_chat():
+    global is_leader
+    global my_uuid
+    global participants_ring
+    global participants_list
     # Broadcast "I want to join the chat"
     try:
         print("Create Client Socket")
         broadcast_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         broadcast_client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        broadcast_client_socket.sendto(encode_data({"name": "test"}), ("255.255.255.255", broadcast_port))
+        data = {
+            "name": my_name
+        }
+        broadcast_client_socket.sendto(encode_data(data), ("255.255.255.255", broadcast_port))
     finally:
         broadcast_client_socket.close()
         
@@ -106,16 +119,33 @@ def join_chat():
         print("accecpt succesfull")
      
         print(f"Connected by {addr}")
-        data = conn.recv(buffer_size)
-        print(decode_data(data))
+        data_encoded = conn.recv(buffer_size)
+        data = decode_data(data_encoded)
+        my_uuid = data["uuid"]
+        participants_ring = data["participants_ring"]
+        participants_list = data["participants_list"]        
     except socket.error:
         print("Timeout !!!")
+        print("Leader because first participant")
+        is_leader = True
+        my_uuid = str(uuid4())
+        participants_ring.append(my_uuid)
+        participants_list[my_uuid] = {
+            "name": my_name,
+            "ipaddress": IPAddr,
+            "is_leader": is_leader
+        }
         
 
     finally:
         confirm_server_socket.close()
-
+    
+    
 def listen_for_participants():
+    global is_leader
+    global my_uuid
+    global participants_ring
+    global participants_list
     try:
         broadcast_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         broadcast_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -125,7 +155,9 @@ def listen_for_participants():
         while True:
             if is_leader:
                 try:
-                    data, address = broadcast_server_socket.recvfrom(buffer_size)
+                    # ipaddress, username, 
+                    data_encoded, address = broadcast_server_socket.recvfrom(buffer_size)
+                    data = decode_data(data_encoded)
                     if address[0] != IPAddr:
 
                         if address:
@@ -133,7 +165,20 @@ def listen_for_participants():
                                 confirm_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                                 confirm_client_socket.connect((address[0], connect_port))
                                 print("connect succesfull")
-                                confirm_client_socket.send(encode_data({"uuid": str(uuid4())}))
+                                uuid =str(uuid4())
+                                participants_ring.append(uuid)
+                                participants_list[uuid] = {
+                                    "name": data["name"],
+                                    "ipaddress": address[0],
+                                    "is_leader": False
+                                }
+
+                                chat_data = {
+                                    "uuid": uuid,
+                                    "participants_ring": participants_ring,
+                                    "participants_list": participants_list
+                                }
+                                confirm_client_socket.send(encode_data(chat_data))
                             finally:
                                 confirm_client_socket.close()
 
@@ -149,8 +194,42 @@ def listen_for_participants():
 #-------------------------------------------------------------------------------------------------------
 
 
+def send_messages():
+    while True:
+        msg = input()
+
+        is_CMD = msg.startswith("cmd:")
+        if is_CMD:
+            run_CMD(msg)
+        else:
+            data = {
+                "message": msg
+            }
+
+            # Create the datagram socket
+            chat_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+            # Set the time-to-live for messages to 1 so they do not go past the
+            # local network segment.
+            ttl = struct.pack('b', 1)
+            chat_client_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
+
+            try:
+
+                # Send data to the multicast group
+                chat_client_socket.sendto(encode_data(data), (chat_address, chat_port))
+
+            finally:
+                chat_client_socket.close()
+          
+
+#-------------------------------------------------------------------------------------------------------
+
+
 # Main Function
 if __name__ == '__main__':
+    print("Enter username: ")
+    my = input()
     print("Your Computer Name is: "+hostname)
     print("Your Computer IP Address is: "+IPAddr)
     # participants.append(participant_data)
@@ -158,3 +237,7 @@ if __name__ == '__main__':
     
     t_listen_for_participants = Thread(target=listen_for_participants, args=(), daemon=False)
     t_listen_for_participants.start()
+
+    # Thread That Sends Messages 
+    t_send_messages = Thread(target=send_messages, args=(), daemon=False)
+    t_send_messages.start()
