@@ -14,7 +14,45 @@ IPAddr=socket.gethostbyname(socket.gethostname()+'.')
 # UDP : socket.SOCK_DGRAM
 # 
 # TCP : socket.SOCK_STREAM
-# 
+#
+
+# TCP flow
+# Server
+# s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# s.bind(address)
+# s.listen()
+# s.accept()
+# s.recv(buffer_size)
+# s.send(bytees_data)
+# s.recv(buffer_size)
+# s.close
+
+# Client
+# s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# s.connect(address)
+# s.send(bytes)
+# s.recv(buffer_size)
+# s.close()
+
+# try:
+#     send encode_data
+#     receve response
+# finally:
+#     close server
+#---------------------------------------------------------------
+
+# UDP flow
+# Server
+# s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# s.bind((address, port))
+# s.recvfrom(buffer_size)
+# s.sendto(bytees_data, address)
+
+# Client
+# s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# s.sendto(bytees_data, (address, port))
+# s.recvfrom(buffer_size)
+#---------------------------------------------------------------
 
 # broadcast sockets
 broadcast_server_socket, broadcast_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) , socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -236,6 +274,11 @@ def send_messages():
 
 #-------------------------------------------------------------------------------------------------------
 
+# Programm: source code for process
+# Process: Unit of program execution as seen by an  OS
+# Thread: Sequential flow of control within a process, Process can contain multiple threads
+# Multiprocessing: concurrent execution of several programms on one machine
+# Multithreading: execution of a programm with multiple threads
 
 if __name__ == '__main__':
     print("Your Computer Name is: "+hostname)
