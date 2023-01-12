@@ -35,23 +35,46 @@ connect_port = 10002
 # multicast chat port
 chat_address = '224.42.69.7'
 chat_port = 10003
+# info chat port
+info_port = 10004
 
 
 #-------------------------------------------------------------------------------------------------------
 
 # helper functions
 def debug(func, msg):
+    """
+    :param func: Function the debug statement is in
+    :param msg: Message that should be Printed
+
+    debug prints a message out if the debug_active variable is set to True
+    """ 
     if debug_active:
         print(func, " -> ", msg)
 
 def encode_data(d):
+    """
+    :param d: Data to encode
+
+    encode_data encodes the data
+    """ 
     return json.dumps(d).encode('utf-8')
 
 def decode_data(d):
+    """
+    :param d: Data to decode
+
+    decode_data decodes the data
+    """ 
     return json.loads(d.decode('utf-8'))
 
 def run_CMD(cmd_msg):
     cmd = cmd_msg.split(":")[1]
+    """
+    :param cmd_msg: Message to be split after the colon
+
+    run_CMD splits message after colon
+    """ 
     
     if cmd == "ip":
         print("> ", IPAddr)
@@ -76,6 +99,11 @@ def run_CMD(cmd_msg):
 # Ring Functions
 
 def form_ring(members):
+    """
+    :param members: Contains the members of the chatroom
+
+    form_ring sorts the members according to IP
+    """ 
     sorted_binary_ring = sorted([socket.inet_aton(member) for member in members])
     sorted_ip_ring = [socket.inet_ntoa(node) for node in sorted_binary_ring]
     return sorted_ip_ring
@@ -280,6 +308,76 @@ def send_messages():
 
 #-------------------------------------------------------------------------------------------------------
 
+# Heart Beat / info ring
+
+def send_heartbeat():
+    while True:
+        debug("send_info", "Connect to neigbour to send info")
+        try:
+            debug("send_info","Create TCP Socket")
+            info_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            debug("send_info","Get neigbour")
+            neighbour = get_neighbour(participants_ring, my_uuid)
+            
+            debug("send_info","Get Info abour neigbour")
+            neighbour_data = participants_list[neighbour]
+            
+            debug("send_info", f"Connect to neighbour {neighbour_data['ipaddress']}")
+            info_client_socket.connect((neighbour_data["ipaddress"], info_port))
+            
+
+            info_data = {
+                "uuid": uuid,
+                "participants_ring": participants_ring,
+                "participants_list": participants_list
+            }
+            status = info_client_socket.send(encode_data(info_data))
+            debug("listen_for_participants", f"connection return status: {status}")
+
+        except socket.error:
+            print("Error Occured info tcp.")
+        finally:
+            info_client_socket.close()
+
+def receive_heartbeat():
+    debug("receive_heartbeat", "")
+    try:
+        info_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        confirm_server_socket.settimeout(5)
+        confirm_server_socket.bind((IPAddr, connect_port))
+        debug("join_chat","bind successfull")
+        confirm_server_socket.listen()
+        debug("join_chat","listen successfull")
+        conn, addr = confirm_server_socket.accept()
+        debug("join_chat","Connection from: " + str(addr))
+        debug("join_chat","accecpt succesfull")
+     
+        debug("join_chat",f"Connected by {addr}")
+        data_encoded = conn.recv(buffer_size)
+        if data_encoded:
+            joined = True
+            data = decode_data(data_encoded)
+            my_uuid = data["uuid"]
+            participants_ring = data["participants_ring"]
+            participants_list = data["participants_list"]    
+    
+    except socket.error:
+        if not joined:
+            debug("join_chat","Timeout !!!")
+            print("Leader because first participant")
+            is_leader = True
+            my_uuid = str(uuid4())
+            participants_ring.append(my_uuid)
+            participants_list[my_uuid] = {
+                "name": my_name,
+                "ipaddress": IPAddr,
+                "is_leader": is_leader
+            }    
+
+
+
+#-------------------------------------------------------------------------------------------------------
 
 # Main Function
 if __name__ == '__main__':
@@ -331,3 +429,34 @@ if __name__ == '__main__':
 
     # print('Heartbeat thread closing')
     # sys.exit(0)
+
+
+    # Transmits multicast messages and checks how many responses are received
+
+
+# def tcp_transmit_message(command, contents, address):
+#     if command != 'PING':
+#         print(f'Sending command {command} to {address}')
+#     message_bytes = encode_message(command, server_address, contents)
+#     utility.tcp_transmit_message(message_bytes, address)
+
+# def tcp_transmit_message(message, address):
+#     transmit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#     transmit_socket.settimeout(1)
+#     transmit_socket.connect(address)
+#     transmit_socket.send(message)
+#     transmit_socket.close()
+
+# def tcp_listener():
+#     client_socket.settimeout(2)
+#     while is_active:
+#         try:
+#             client, address = client_socket.accept()
+#         except TimeoutError:
+#             pass
+#         else:
+#             message = decode_message(client.recv(BUFFER_SIZE))
+#             server_command(message)
+
+#     client_socket.close()
+#     sys.exit(0)
