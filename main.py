@@ -11,13 +11,6 @@ import time
 # Global Variables
 debug_active = True
 hostname=socket.gethostname()
-IPAddr=socket.gethostbyname(socket.gethostname()+'.')
-# Work around if get host returns localhost
-if IPAddr == "127.0.0.1":
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    IPAddr = s.getsockname()[0]
-    s.close()
 
 buffer_size = 4069
 is_leader = False
@@ -42,6 +35,7 @@ info_port = 10004
 #-------------------------------------------------------------------------------------------------------
 
 # helper functions
+
 def debug(func, msg):
     """
     :param func: Function the debug statement is in
@@ -51,6 +45,15 @@ def debug(func, msg):
     """ 
     if debug_active:
         print(func, " -> ", msg)
+
+
+def clear_output():
+    """
+    clear_output: Clear the console output
+    """
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+# Data encoding and decoding
 
 def encode_data(d):
     """
@@ -68,6 +71,84 @@ def decode_data(d):
     """ 
     return json.loads(d.decode('utf-8'))
 
+def get_ip_address():
+    """
+    :return Comuters IP address
+    
+    get_ip_address Returns the IP address of the System
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        debug("get_ip_address", "Failed to get IP address")
+    finally:
+        s.close()
+    return ip
+
+# Create Listeners
+
+def create_tcp_listener_socket():
+    """
+    :return tcp socket
+
+    create_tcp_listener_socket Creates a TCP socket to listen to unicast messages
+    """
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(get_ip_address(), 0)
+    s.listen()
+    return s
+
+def create_udp_broadcast_listener_socket(timeout=None):
+    """
+    :param timeout: Set a timeour for the 
+    
+    :return UDP socket
+    
+    create_udp_broadcast_listener_socket: Create UDP socket for listening to broadcasted messages
+    """
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create UDP socket
+    s.bind((get_ip_address(), 0))
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # this is a broadcast socket
+    if timeout:
+        s.settimeout(timeout)
+    return s
+
+def create_udp_multicast_listener_socket(group):
+    """
+    :param group: Multicast ip and port 
+    
+    :return UDP socket
+    
+    create_udp_multicast_listener_socket: Create UDP socket for listening to multicasted messages
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(group)
+
+    group = socket.inet_aton(group[0])
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    return s
+
+# Sender
+
+def send_tcp_message(data, address):
+    """
+    :param data: data to send
+    :param address: Address to send the data to
+
+    send_tcp_message: Sends tcp messages by opening a new socket, 
+    connecting to the socket, encoding the data, sending the data, and then closing the socket
+    """
+    transmit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    transmit_socket.settimeout(1)
+    transmit_socket.connect(address)
+    transmit_socket.send(encode_data(data))
+    transmit_socket.close()
+
 def run_CMD(cmd_msg):
     cmd = cmd_msg.split(":")[1]
     """
@@ -77,7 +158,7 @@ def run_CMD(cmd_msg):
     """ 
     
     if cmd == "ip":
-        print("> ", IPAddr)
+        print("> ", get_ip_address())
     elif cmd == "my_uuid":
         print(">", my_uuid)
     elif cmd == "participants_ring":
@@ -400,63 +481,3 @@ if __name__ == '__main__':
     t_send_messages = Thread(target=send_messages, args=(), daemon=False)
     t_send_messages.start()
 
-
-
-
-    # implement heartbeat 
-
-    # def heartbeat():
-    # missed_beats = 0
-    # while is_active:
-    #     if neighbor:
-    #         try:
-    #             tcp_transmit_message('PING', '', neighbor)
-    #             sleep(0.2)
-    #         except (ConnectionRefusedError, TimeoutError):
-    #             missed_beats += 1
-    #         else:
-    #             missed_beats = 0
-    #         if missed_beats > 4:                                                         # Once 5 beats have been missed
-    #             print(f'{missed_beats} failed pings to neighbor, remove {neighbor}')     # print to console
-    #             servers.remove(neighbor)                                                 # remove the missing server
-    #             missed_beats = 0                                                         # reset the count
-    #             tcp_msg_to_servers('QUIT', format_join_quit('server', False, neighbor))  # inform the others
-    #             neighbor_was_leader = neighbor == leader_address                         # check if neighbor was leader
-    #             find_neighbor()                                                          # find a new neighbor
-    #             if neighbor_was_leader:                                                  # if the neighbor was leader
-    #                 print('Previous neighbor was leader, starting election')             # print to console
-    #                 vote()                                                               # start an election
-
-    # print('Heartbeat thread closing')
-    # sys.exit(0)
-
-
-    # Transmits multicast messages and checks how many responses are received
-
-
-# def tcp_transmit_message(command, contents, address):
-#     if command != 'PING':
-#         print(f'Sending command {command} to {address}')
-#     message_bytes = encode_message(command, server_address, contents)
-#     utility.tcp_transmit_message(message_bytes, address)
-
-# def tcp_transmit_message(message, address):
-#     transmit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#     transmit_socket.settimeout(1)
-#     transmit_socket.connect(address)
-#     transmit_socket.send(message)
-#     transmit_socket.close()
-
-# def tcp_listener():
-#     client_socket.settimeout(2)
-#     while is_active:
-#         try:
-#             client, address = client_socket.accept()
-#         except TimeoutError:
-#             pass
-#         else:
-#             message = decode_message(client.recv(BUFFER_SIZE))
-#             server_command(message)
-
-#     client_socket.close()
-#     sys.exit(0)
