@@ -1,35 +1,34 @@
 # Imports
 import socket
-from threading import Thread, Condition
-from multiprocessing import Process
+from threading import Thread
 import os
-from uuid import uuid4
-import json
 import struct
 from time import sleep
 import sys
 import ast
 #-------------------------------------------------------------------------------------------------------
-# Set debug mode boolean
+# Set debug mode boolean used by debug function
 debug_active = True
 
 # By changing the port numbers, there can be more than one chat on a network
 BROADCAST_PORT = 10001
-ML_PEER_PORT = 10002
+MULTICAST_PORT = 10002
+
+# Size of Buffer for messages
 BUFFER_SIZE = 4096
-# Random code to broadcast / listen for to filter out other network traffic
-BROADCAST_CODE = '9310e231f20a07cb53d96b90a978163d'
-# Random code to respond with
-RESPONSE_CODE = 'f56ddd73d577e38c45769dcd09dc9d99'
+
+# Random code to broadcast and respond / listen for to filter out other network traffic
+BROADCAST_CODE = 'mgay2su4peecmsreducv7vaez8ceacnc'
+RESPONSE_CODE = 'xe3uyyqpvtwv234hrgsarcwjkbev8ywy'
+
 # Number of broadcasts made by a server at startup
 SERVER_BROADCAST_ATTEMPTS = 5
-# Addresses for multicast groups
+
+
+# Addresses for multicast group
 # Block 224.3.0.64-224.3.255.255 is all unassigned
-# Choices are arbitrary for now
 class MG:
-    #SERVER = ('224.3.100.255', ML_SERVER_PORT)
-    #CLIENT = ('224.3.200.255', ML_CLIENT_PORT)
-    PEER = ('224.3.200.255', ML_PEER_PORT)
+    PEER = ('224.3.250.250', MULTICAST_PORT)
 
 # Variables for leadership and voting
 leader_address = None
@@ -37,12 +36,9 @@ is_leader = False
 is_voting = False
 neighbour = None
 
-# Flag to enable stopping the client
+# Flag to enable stopping the system
 is_active = True
 
-
-# Dict for the peer mulitcast messages
-peer_multi_msgs = {}
 
 # How many messages we want to store in the dictionaries
 keep_msgs = 5
@@ -52,6 +48,8 @@ keep_msgs = 5
 # Utils
 
 def clear_console():
+    """
+    """
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def debug(func, msg):
@@ -133,7 +131,6 @@ def multicast_transmit_message(command, contents, group):
             return
         expected_responses = len_other_peers
         send_to = 'peers'
-        multi_msgs = peer_multi_msgs
     else:
         raise ValueError('Invalid multicast group')
      
@@ -152,9 +149,6 @@ def multicast_transmit_message(command, contents, group):
     finally:
         m_sender_socket.close()
 
-
-    if len(multi_msgs) > keep_msgs:
-        multi_msgs.pop(next(iter(multi_msgs)))
 
 def message_to_peers(command, contents=''):
     multicast_transmit_message(command, contents, MG.PEER)
@@ -196,23 +190,22 @@ def tcp_msg_to_peers(command, contents=''):
 
 # Transmits the current server and client lists from the leader to the new server
 def transmit_state(address):
-    state = {'peers': peers,
-             'peer_multi_msgs': peer_multi_msgs}
+    state = {'peers': peers}
     tcp_transmit_message('STATE', state, address)
 
 
 # Receives the current server and client lists from the leader
 def receive_state(state):
     """
+    receive_state: receives the current server and client lists from the leader
     """
-    global peers, peer_multi_msgs
+    global peers
 
     peers = [my_address]        # Clear the server list (except for this server)
     peers.extend(state["peers"])  # Add the received list to the servers
     peers = list(set(peers))      # Remove any duplicates
     find_neighbour()                   # Find neighbour (also takes care of sorting)
 
-    peer_multi_msgs = state["peer_multi_msgs"]
 
 def command(message, cmd=False):
     """
@@ -302,16 +295,6 @@ def command(message, cmd=False):
                     if address != my_address:
                         set_leader(address)
                         tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
-            # Replies with the requested message to the requesting server
-            case {'command': 'MSG', 'contents': {'list': list_type}, 'sender': address}:
-                if list_type == 'peer':
-                    multi_msgs = peer_multi_msgs
-                else:
-                    ValueError(f'Message requested from invalid list, {list_type =}')
-
-                message = multi_msgs[0]
-                print(f'{message =}')
-                tcp_transmit_message(message['command'], message['contents'], address)
             # Either shutdown just this server (for testing leader election)
             # Or shutdown the whole chatroom
             case {'command': 'DOWN', 'contents': inform_others}:
@@ -556,7 +539,6 @@ def multicast_listener(group):
     #todo: match check if client is ok
     if group == MG.PEER:
             name = 'peer'
-            multi_msgs = peer_multi_msgs
     else:
         raise ValueError('Invalid multicast group')
 
