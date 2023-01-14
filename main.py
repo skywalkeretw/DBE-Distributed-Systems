@@ -39,16 +39,13 @@ neighbour = None
 # Flag to enable stopping the system
 is_active = True
 
-
-# How many messages we want to store in the dictionaries
-keep_msgs = 5
-
 #-------------------------------------------------------------------------------------------------------
 
 # Utils
 
 def clear_console():
     """
+    clear_console: Clears the console output
     """
     os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -57,10 +54,15 @@ def debug(func, msg):
     :param func: Function the debug statement is in
     :param msg: Message that should be Printed
 
-    debug prints a message out if the debug_active variable is set to True
+    debug: prints a message out if the debug_active variable is set to True
     """ 
     if debug_active:
         print("Debug: ", func, " -> ", msg)
+
+
+#-------------------------------------------------------------------------------------------------------
+
+# Socket Listener
 
 def create_udp_broadcast_listener_socket(timeout=None):
     """
@@ -70,17 +72,16 @@ def create_udp_broadcast_listener_socket(timeout=None):
     
     create_udp_broadcast_listener_socket: Create UDP socket for listening to broadcasted messages
     """
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create UDP socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
     s.bind((get_ip_address(), 0))
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # this is a broadcast socket
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     if timeout:
         s.settimeout(timeout)
     return s
 
 def create_udp_multicast_listener_socket(group):
     """
-    :param group: Multicast ip and port 
+    :param group: Multicast ip and port as tuple
     
     :return UDP socket
     
@@ -88,7 +89,6 @@ def create_udp_multicast_listener_socket(group):
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(group)
-
     group = socket.inet_aton(group[0])
     mreq = struct.pack('4sL', group, socket.INADDR_ANY)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
@@ -100,18 +100,25 @@ def create_tcp_listener_socket():
 
     create_tcp_listener_socket Creates a TCP socket to listen to unicast messages
     """
-
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind((get_ip_address(), 0))
     s.listen()
     return s
 
+#-------------------------------------------------------------------------------------------------------
+
+# Socket Send
+
 def tcp_transmit_message(command, contents, address):
     """
-    tcp_transmit_message
+    :param command: Action that should be executed (CHAT, JOIN, PING...)
+    :param contents: Data to be sent
+    :param address: Address tupple to send the message to
+
+    tcp_transmit_message: Send TCP Message to peer
     """
     if command != 'PING':
-        print(f'Sending command {command} to {address}')
+        debug("tcp_transmit_message", f'Sending command {command} to {address}')
     message_bytes = encode_message(command, my_address, contents)
     transmit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     transmit_socket.settimeout(1)
@@ -120,38 +127,37 @@ def tcp_transmit_message(command, contents, address):
     transmit_socket.close()
 
 
-def multicast_transmit_message(command, contents, group):
+def multicast_transmit_message(command, contents='', group=MG.PEER):
     """
-    multicast_transmit_message: transmits multicast messages and checks how many responses are received
-    """
-    len_other_peers = len(peers) - 1 # We expect responses from every other than the sender
+    :param command: Action that should be executed (CHAT, JOIN, PING...)
+    :param contents: Data to be sent
+    :param address: Address tupple to send the message to the Multicast Group
 
+    multicast_transmit_message: transmits multicast messages
+    """
     if group == MG.PEER:
-        if not len_other_peers:  # If there are no other servers, don't bother transmitting
+        # If there are no other servers, no need to send message
+        if not (len(peers) - 1):  
             return
-        expected_responses = len_other_peers
         send_to = 'peers'
     else:
         raise ValueError('Invalid multicast group')
      
-    print(f'Sending multicast command {command} to {send_to}')
+    debug("multicast_transmit_message", f'Sending multicast command {command} send message {contents} to {send_to}')
 
-    # Create the socket
     m_sender_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     m_sender_socket.settimeout(0.2)
     m_sender_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
 
-
     try:
-        # Send message to the multicast group
         message_bytes = encode_message(command, my_address, contents)
         m_sender_socket.sendto(message_bytes, group)
     finally:
         m_sender_socket.close()
 
 
-def message_to_peers(command, contents=''):
-    multicast_transmit_message(command, contents, MG.PEER)
+
+
 
 
 def ping_peers(peer_to_ping=None):
@@ -172,7 +178,7 @@ def ping_peers(peer_to_ping=None):
             print(f'Removing {peer} from peer')
             try:
                 peers.remove(peers)
-                message_to_peers('QUIT', format_join_quit('client', False, peer))
+                multicast_transmit_message('QUIT', format_join_quit('client', False, peer))
                 # message_to_clients('SERV', f'{client[0]} is unreachable')
             except ValueError:
                 print(f'{peer} was not in peers')
@@ -250,8 +256,8 @@ def command(message, cmd=False):
                     raise ValueError(f'Tried to add invalid node type: {node_type =}')
 
                 if inform_others:
-                    message_to_peers('JOIN', format_join_quit(node_type, False, address))
-                    message_to_peers('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
+                    multicast_transmit_message('JOIN', format_join_quit(node_type, False, address))
+                    multicast_transmit_message('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
                     transmit_state(address)# todo: check to see if needed                    
 
                 if address not in node_list:  # We NEVER want duplicates in our lists
@@ -270,7 +276,7 @@ def command(message, cmd=False):
                     raise ValueError(f'Tried to remove invalid node type: {node_type =}')
 
                 if inform_others:
-                    message_to_peers('QUIT', format_join_quit(node_type, False, address))
+                    multicast_transmit_message('QUIT', format_join_quit(node_type, False, address))
                 try:
                     print(f'Removing {address} from {node_type} list')
                     node_list.remove(address)
@@ -314,7 +320,7 @@ def set_leader(address):
     is_voting = False
     if is_leader:
         print('I am the leader')
-        message_to_peers('LEAD')
+        multicast_transmit_message('LEAD')
         if neighbour:
             tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbour)
     else:
@@ -379,6 +385,8 @@ def parse_multicast(message, group):
         command(message)
     else:
         raise ValueError(f'Invalid multicast group, {group =}')
+        
+#-------------------------------------------------------------------------------------------------------        
 
 # Data Functions
 
@@ -403,7 +411,6 @@ def format_join_quit(node_type, inform_others, address):
     return {'node_type': node_type, 'inform_others': inform_others, 'address': address}
 
 #-------------------------------------------------------------------------------------------------------
-
 
 # Server Functions
 
@@ -516,20 +523,20 @@ def heartbeat():
                 missed_beats += 1
             else:
                 missed_beats = 0
-            if missed_beats > 4:                                                         # Once 5 beats have been missed
-                print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')     # print to console
+            if missed_beats > 4:                                                             # Once 5 beats have been missed
+                print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
                 # remove the missing server
                 peers.remove(neighbour)                                            
-                missed_beats = 0                                                         # reset the count
-                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))     # inform the others
-                find_neighbour()                                                          # find a new neighbour
+                missed_beats = 0                                                             # reset the count
+                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
+                find_neighbour()                                                             # find a new neighbour
                 #check if neighbour was leader if the neighbour was leader
                 debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
                 neighbour_was_leader = neighbour == leader_address
                 debug("heartbeat", f"{neighbour_was_leader}")
                 if neighbour_was_leader or not neighbour:                                                  
-                    print('Previous neighbour was leader, starting election')             # print to console
-                    vote(my_address)                                                               # start an election
+                    print('Previous neighbour was leader, starting election')                 # print to console
+                    vote(my_address)                                                          # start an election
 
     print('Heartbeat thread closing')
     sys.exit(0)
@@ -552,7 +559,8 @@ def multicast_listener(group):
         except TimeoutError:
             pass
         else:
-            if address != my_address:
+            debug("multicast_listener", f"address: {address} my_address {my_address}")
+            if address[0] != my_address[0]:
                 message = decode_message(data)
                 command(message)
                 parse_multicast(message, group)
@@ -586,7 +594,7 @@ def transmit_messages():
             # client comand edit
             command(message, True)
         else:
-            message_to_peers('CHAT', message)
+            multicast_transmit_message('CHAT', message)
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
@@ -609,3 +617,5 @@ if __name__ == '__main__':
 
     Thread(target=multicast_listener, args=(MG.PEER,)).start()
     Thread(target=transmit_messages).start()
+
+#-------------------------------------------------------------------------------------------------------
