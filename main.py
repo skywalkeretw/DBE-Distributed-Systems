@@ -10,6 +10,8 @@ from time import sleep
 import sys
 import ast
 #-------------------------------------------------------------------------------------------------------
+# Set debug mode boolean
+debug_active = True
 
 # By changing the port numbers, there can be more than one chat on a network
 BROADCAST_PORT = 10001
@@ -54,9 +56,19 @@ keep_msgs = 5
 
 # Utils
 
+def debug(func, msg):
+    """
+    :param func: Function the debug statement is in
+    :param msg: Message that should be Printed
+
+    debug prints a message out if the debug_active variable is set to True
+    """ 
+    if debug_active:
+        print("Debug: ", func, " -> ", msg)
+
 def create_udp_broadcast_listener_socket(timeout=None):
     """
-    :param timeout: Set a timeour for the 
+    :param timeout: Set a timeout for the 
     
     :return UDP socket
     
@@ -68,6 +80,22 @@ def create_udp_broadcast_listener_socket(timeout=None):
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # this is a broadcast socket
     if timeout:
         s.settimeout(timeout)
+    return s
+
+def create_udp_multicast_listener_socket(group):
+    """
+    :param group: Multicast ip and port 
+    
+    :return UDP socket
+    
+    create_udp_multicast_listener_socket: Create UDP socket for listening to multicasted messages
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(group)
+
+    group = socket.inet_aton(group[0])
+    mreq = struct.pack('4sL', group, socket.INADDR_ANY)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     return s
 
 def create_tcp_listener_socket():
@@ -387,6 +415,11 @@ def get_ip_address():
     return ip
 
 
+def parse_multicast(message, group):
+    if group == MG.PEER:
+        server_command(message)
+    else:
+        raise ValueError(f'Invalid multicast group, {group =}')
 
 # Data Functions
 
@@ -492,6 +525,10 @@ def heartbeat():
     """
     missed_beats = 0
     while is_active:
+        # find_neighbour()
+        # if neighbour and neighbour != my_address:
+        #     debug("heartbeat",f"missed_beats: {missed_beats} |  neighbour: {neighbour}" )
+        #debug("heartbeat",f"missed_beats: {missed_beats} |  neighbour: {neighbour}" )
         if neighbour:
             try:
                 tcp_transmit_message('PING', '', neighbour)
@@ -513,6 +550,55 @@ def heartbeat():
 
     print('Heartbeat thread closing')
     sys.exit(0)
+
+# Listens for multicasted messages
+def multicast_listener(group):
+    #todo: match check if client is ok
+    if group == MG.PEER:
+            name = 'peer'
+            clock = peer_clock
+            multi_msgs = peer_multi_msgs
+    else:
+        raise ValueError('Invalid multicast group')
+
+    # Create the socket
+    m_listener_socket = create_udp_multicast_listener_socket(group)
+    m_listener_socket.settimeout(2)
+
+    while is_active:
+        try:
+            data, address = m_listener_socket.recvfrom(BUFFER_SIZE)
+        except TimeoutError:
+            pass
+        else:
+            message = decode_message(data)
+            # If we've picked up our own message
+            # Or the message has a lower clock than the next expected message
+            # Ignore it
+            if message['sender'] == my_address or message['clock'][0] <= clock[0]:
+                continue
+
+            print(f'Listener {name} received multicast command {message["command"]} from {message["sender"]}')
+            m_listener_socket.sendto(b'ack', address)
+
+            clock[0] += 1
+            # Causal ordering doesn't really matter here.
+            # Just has to be reliable
+            for i in range(clock[0], message['clock'][0]):
+                print(f'Requesting missing {name} message with clock {i}')
+                tcp_transmit_message('MSG', {'list': name, 'clock': [i]}, message['sender'])
+                clock[0] += 1
+
+            if clock[0] != message['clock'][0]:
+                raise ValueError(f'Clock is not correct, {clock =}')
+            multi_msgs[str(clock[0])] = {'command': message["command"], 'contents': message["contents"]}
+            if len(multi_msgs) > keep_msgs:
+                multi_msgs.pop(next(iter(multi_msgs)))
+            parse_multicast(message, group)
+
+    print(f'Multicast listener {name} closing')
+    m_listener_socket.close()
+    sys.exit(0)
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
@@ -533,6 +619,7 @@ if __name__ == '__main__':
     Thread(target=tcp_listener).start()
     Thread(target=heartbeat).start()
 
+    Thread(target=multicast_listener, args=(MG.PEER,)).start()
 #----
 
 
