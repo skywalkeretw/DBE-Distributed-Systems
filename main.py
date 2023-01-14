@@ -263,14 +263,6 @@ def command(message, cmd=False):
                     if address != my_address:
                         set_leader(address)
                         tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
-            # Either shutdown just this server (for testing leader election)
-            # Or shutdown the whole chatroom
-            case {'command': 'DOWN', 'contents': inform_others}:
-                if inform_others:
-                    tcp_msg_to_peers('DOWN')
-                print(f'Shutting down at {my_address}')
-                global is_active
-                is_active = False
 
 def set_leader(address):
     """
