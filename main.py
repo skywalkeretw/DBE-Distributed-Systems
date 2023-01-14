@@ -35,7 +35,7 @@ class MG:
 leader_address = None
 is_leader = False
 is_voting = False
-neighbor = None
+neighbour = None
 
 # Flag to enable stopping the client
 is_active = True
@@ -94,6 +94,27 @@ def tcp_transmit_message(command, contents, address):
     transmit_socket.connect(address)
     transmit_socket.send(message_bytes)
     transmit_socket.close()
+
+def tcp_listener():
+    """
+    tcp_listener:
+    Function to listen for tcp (unicast) messages
+    passes valid commands to server_command
+    """
+    tcp_listener_socket.settimeout(2)
+    while is_active:
+        try:
+            client, address = tcp_listener_socket.accept()
+        except TimeoutError:
+            pass
+        else:
+            message = decode_message(client.recv(BUFFER_SIZE))
+            if message['command'] != 'PING':  # We don't print pings since that would be a lot
+                print(f'Command {message["command"]} received from {message["sender"]}')
+            server_command(message)
+
+    print('Unicast listener closing')
+    tcp_listener_socket.close()
 
 
 def multicast_transmit_message(command, contents, group):
@@ -179,6 +200,100 @@ def tcp_msg_to_peers(command, contents=''):
         except (ConnectionRefusedError, TimeoutError):
             print(f'Unable to send to {peers}')
 
+def server_command(message):
+    match message:
+        # Sends the chat message to all clients
+        # The client is responsible for not printing messages it originally sent
+        case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
+            chat_message = {'chat_sender': sender, 'chat_contents': contents}
+            message_to_clients('CHAT', chat_message)
+        # Add the provided node to this server's list
+        # If the request came from the node to be added inform the other servers
+        # If the node is a server, send it the server and client lists
+        case {'command': 'JOIN',
+              'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
+            if node_type == 'server':
+                node_list = servers
+            elif node_type == 'client':
+                node_list = clients
+            else:
+                raise ValueError(f'Tried to add invalid node type: {node_type =}')
+
+            if inform_others:
+                message_to_servers('JOIN', format_join_quit(node_type, False, address))
+                if node_type == 'client':
+                    message_to_clients('SERV', f'{address[0]} has joined the chat')
+                    tcp_transmit_message('CLOCK', client_clock, address)
+                elif node_type == 'server':
+                    transmit_state(address)
+
+            if address not in node_list:  # We NEVER want duplicates in our lists
+                print(f'Adding {address} to {node_type} list')
+                node_list.append(address)
+                if node_type == 'server':
+                    find_neighbor()
+        # Remove the provided node to this server's list
+        # If the request came from the node to be removed inform the other servers
+        # If the node is a client, then inform the other clients
+        case {'command': 'QUIT',
+              'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
+            if node_type == 'server':
+                node_list = servers
+            elif node_type == 'client':
+                node_list = clients
+            else:
+                raise ValueError(f'Tried to remove invalid node type: {node_type =}')
+
+            if inform_others:
+                if node_type == 'client':
+                    message_to_clients('SERV', f'{address[0]} has left the chat')
+                message_to_servers('QUIT', format_join_quit(node_type, False, address))
+            try:
+                print(f'Removing {address} from {node_type} list')
+                node_list.remove(address)
+                if node_type == 'server':
+                    find_neighbor()
+            except ValueError:
+                print(f'{address} was not in {node_type} list')
+        # Calls a function to import the current state from the leader
+        # This is split of for readability and to keep global overwriting of the lists out of this function
+        case {'command': 'STATE', 'contents': state}:
+            receive_state(state)
+        # Receive a vote in the election
+        # If I get a vote for myself then I've won the election. If not, then vote
+        # If the leader has been elected then set the new leader
+        case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
+            if not leader_elected:
+                if address == server_address:
+                    set_leader(server_address)
+                else:
+                    vote(address)
+            else:
+                if address != server_address:
+                    set_leader(address)
+                    tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbor)
+        # Replies with the requested message to the requesting server
+        case {'command': 'MSG', 'contents': {'list': list_type, 'clock': msg_clock}, 'sender': address}:
+            if list_type == 'server':
+                multi_msgs = server_multi_msgs
+            elif list_type == 'client':
+                multi_msgs = client_multi_msgs
+            else:
+                ValueError(f'Message requested from invalid list, {list_type =}')
+
+            message = multi_msgs[str(msg_clock[0])]
+            print(f'{message =}')
+            tcp_transmit_message(message['command'], message['contents'], address)
+        # Either shutdown just this server (for testing leader election)
+        # Or shutdown the whole chatroom
+        case {'command': 'DOWN', 'contents': inform_others}:
+            if inform_others:
+                tcp_msg_to_clients('DOWN')
+                tcp_msg_to_servers('DOWN')
+            print(f'Shutting down server at {server_address}')
+            global is_active
+            is_active = False
+
 def set_leader(address):
     """
     set_leader: 
@@ -190,46 +305,46 @@ def set_leader(address):
     if is_leader:
         print('I am the leader')
         message_to_peers('LEAD')
-        if neighbor:
-            tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbor)
+        if neighbour:
+            tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbour)
     else:
         print(f'The leader is {leader_address}')
 
-def find_neighbor():
+def find_neighbour():
     """
-    Figuring out who is our neighbor 
-    Our neighbor is the server with the next highest address
-    The neighbors are used for crash fault tolerance and for voting
+    find_neighbour: Figuring out who is our neighbour 
+    Our neighbour is the server with the next highest address
+    The neighbourus are used for crash fault tolerance and for voting
     """
-    global neighbor
+    global neighbour
     length = len(peers)
     if length == 1:
-        neighbor = None
-        print('I have no neighbor')
+        neighbour = None
+        print('I have no neighbour')
         return
     peers.sort()
     index = peers.index(my_address)
-    neighbor = peers[0] if index + 1 == length else peers[index + 1]
-    print(f'My neighbor is {neighbor}')
+    neighbour = peers[0] if index + 1 == length else peers[index + 1]
+    print(f'My neighbour is {neighbour}') 
 
 
 def vote(address):
     """
     :param address: my_address needs to bet set
 
-    vote: starts voting by setting is_voting to true and sending a vote to neighbor
+    vote: starts voting by setting is_voting to true and sending a vote to neighbour
     ff we're the only peer, we win the vote automatically
     if we're the first peer to vote, this will start the whole election
     and we just vote for ourself
     otherwise, we vote for the max out of our address and the vote we received
     """
-    if not neighbor:
+    if not neighbour:
         set_leader(my_address)
         return
     global is_voting
     vote_for = max(address, my_address)
     if vote_for != my_address or not is_voting:
-        tcp_transmit_message('VOTE', {'vote_for': vote_for, 'leader_elected': False}, neighbor)
+        tcp_transmit_message('VOTE', {'vote_for': vote_for, 'leader_elected': False}, neighbour)
     is_voting = True
 
 def get_ip_address():
@@ -350,27 +465,27 @@ def broadcast_listener():
 
 def heartbeat():
     """
-    heartbeat: Function to ping the neighbor, and respond if unable to do so
+    heartbeat: Function to ping the neighbour, and respond if unable to do so
     """
     missed_beats = 0
     while is_active:
-        if neighbor:
+        if neighbour:
             try:
-                tcp_transmit_message('PING', '', neighbor)
+                tcp_transmit_message('PING', '', neighbour)
                 sleep(0.2)
             except (ConnectionRefusedError, TimeoutError):
                 missed_beats += 1
             else:
                 missed_beats = 0
             if missed_beats > 4:                                                         # Once 5 beats have been missed
-                print(f'{missed_beats} failed pings to neighbor, remove {neighbor}')     # print to console
-                peers.remove(neighbor)                                                 # remove the missing server
+                print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')     # print to console
+                peers.remove(neighbour)                                                 # remove the missing server
                 missed_beats = 0                                                         # reset the count
-                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbor))  # inform the others
-                neighbor_was_leader = neighbor == leader_address                         # check if neighbor was leader
-                find_neighbor()                                                          # find a new neighbor
-                if neighbor_was_leader:                                                  # if the neighbor was leader
-                    print('Previous neighbor was leader, starting election')             # print to console
+                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))     # inform the others
+                neighbour_was_leader = neighbour == leader_address                         # check if neighbour was leader
+                find_neighbour()                                                          # find a new neighbour
+                if neighbour_was_leader:                                                  # if the neighbour was leader
+                    print('Previous neighbour was leader, starting election')             # print to console
                     vote()                                                               # start an election
 
     print('Heartbeat thread closing')
@@ -379,8 +494,8 @@ def heartbeat():
 
 # Create TCP socket for listening to unicast messages
 # The address tuple of this socket is the unique identifier for the server
-server_socket = create_tcp_listener_socket()
-my_address = server_socket.getsockname() # to-do: rename to own address or peer_address
+tcp_listener_socket = create_tcp_listener_socket()
+my_address = tcp_listener_socket.getsockname() # to-do: rename to own address or peer_address
 
 # Lists for connected clients and servers
 peers = [my_address]  # Server list starts with this server in it
