@@ -15,8 +15,6 @@ debug_active = True
 
 # By changing the port numbers, there can be more than one chat on a network
 BROADCAST_PORT = 10001
-#ML_SERVER_PORT = 10002
-#ML_CLIENT_PORT = 10003
 ML_PEER_PORT = 10002
 BUFFER_SIZE = 4096
 # Random code to broadcast / listen for to filter out other network traffic
@@ -42,9 +40,6 @@ neighbour = None
 # Flag to enable stopping the client
 is_active = True
 
-# Counts for server and client multicasts
-peer_clock = [0]
-# in case leader_clock necessary?
 
 # Dict for the peer mulitcast messages
 peer_multi_msgs = {}
@@ -139,12 +134,10 @@ def multicast_transmit_message(command, contents, group):
         expected_responses = len_other_peers
         send_to = 'peers'
         multi_msgs = peer_multi_msgs
-        clock = peer_clock
     else:
         raise ValueError('Invalid multicast group')
      
-    clock[0] += 1
-    print(f'Sending multicast command {command} to {send_to} with clock {clock[0]}')
+    print(f'Sending multicast command {command} to {send_to}')
 
     # Create the socket
     m_sender_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -155,7 +148,7 @@ def multicast_transmit_message(command, contents, group):
 
     try:
         # Send message to the multicast group
-        message_bytes = encode_message(command, my_address, contents, clock)
+        message_bytes = encode_message(command, my_address, contents)
         m_sender_socket.sendto(message_bytes, group)
 
         # Look for responses from all recipients
@@ -172,7 +165,6 @@ def multicast_transmit_message(command, contents, group):
         if group == MG.PEER and responses < expected_responses:
             ping_peers()
 
-    multi_msgs[str(clock[0])] = {'command': command, 'contents': contents}
     if len(multi_msgs) > keep_msgs:
         multi_msgs.pop(next(iter(multi_msgs)))
 
@@ -215,25 +207,20 @@ def tcp_msg_to_peers(command, contents=''):
             print(f'Unable to send to {peers}')
 
 # Transmits the current server and client lists from the leader to the new server
-# Will be expanded later for clocks
 def transmit_state(address):
     state = {'peers': peers,
-             'peer_clock': peer_clock,
              'peer_multi_msgs': peer_multi_msgs}
     tcp_transmit_message('STATE', state, address)
 
 
 # Receives the current server and client lists from the leader
-# Will be expanded later for clocks
 def receive_state(state):
-    global peers, peer_clock, peer_multi_msgs
+    global peers, peer_multi_msgs
 
     peers = [my_address]        # Clear the server list (except for this server)
     peers.extend(state["peers"])  # Add the received list to the servers
     peers = list(set(peers))      # Remove any duplicates
     find_neighbour()                   # Find neighbour (also takes care of sorting)
-
-    peer_clock[0] = state["peer_clock"][0]
 
     peer_multi_msgs = state["peer_multi_msgs"]
 
@@ -269,8 +256,8 @@ def command(message, cmd=False):
             # Sends the chat message to all clients
             # The client is responsible for not printing messages it originally sent
             case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
-                chat_message = {'chat_sender': sender, 'chat_contents': contents}
-                message_to_peers('CHAT', chat_message)
+                debug("command", f"{sender}: {contents}")
+                print(f"{sender[0]} : {contents}")
             # Add the provided node to this server's list
             # If the request came from the node to be added inform the other servers
             # If the node is a server, send it the server and client lists
@@ -284,7 +271,6 @@ def command(message, cmd=False):
                 if inform_others:
                     message_to_peers('JOIN', format_join_quit(node_type, False, address))
                     message_to_peers('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
-                    tcp_transmit_message('CLOCK', peer_clock, address)# todo: check to see if needed
                     transmit_state(address)# todo: check to see if needed                    
 
                 if address not in node_list:  # We NEVER want duplicates in our lists
@@ -329,13 +315,13 @@ def command(message, cmd=False):
                         set_leader(address)
                         tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
             # Replies with the requested message to the requesting server
-            case {'command': 'MSG', 'contents': {'list': list_type, 'clock': msg_clock}, 'sender': address}:
+            case {'command': 'MSG', 'contents': {'list': list_type}, 'sender': address}:
                 if list_type == 'peer':
                     multi_msgs = peer_multi_msgs
                 else:
                     ValueError(f'Message requested from invalid list, {list_type =}')
 
-                message = multi_msgs[str(msg_clock[0])]
+                message = multi_msgs[0]
                 print(f'{message =}')
                 tcp_transmit_message(message['command'], message['contents'], address)
             # Either shutdown just this server (for testing leader election)
@@ -425,11 +411,11 @@ def parse_multicast(message, group):
 
 # Data Functions
 
-def encode_message(command, sender, contents='', clock=None):
+def encode_message(command, sender, contents=''):
     """
     encode_message
     """
-    message_dict = {'command': command, 'sender': sender, 'contents': contents, 'clock': clock}
+    message_dict = {'command': command, 'sender': sender, 'contents': contents}
     return repr(message_dict).encode()
 
 def decode_message(message):
@@ -582,7 +568,6 @@ def multicast_listener(group):
     #todo: match check if client is ok
     if group == MG.PEER:
             name = 'peer'
-            clock = peer_clock
             multi_msgs = peer_multi_msgs
     else:
         raise ValueError('Invalid multicast group')
@@ -601,23 +586,13 @@ def multicast_listener(group):
             # If we've picked up our own message
             # Or the message has a lower clock than the next expected message
             # Ignore it
-            if message['sender'] == my_address or message['clock'][0] <= clock[0]:
-                continue
-
-            print(f'Listener {name} received multicast command {message["command"]} from {message["sender"]}')
-            m_listener_socket.sendto(b'acxk', address)
-
-            clock[0] += 1
-            # Causal ordering doesn't really matter here.
-            # Just has to be reliable
-            for i in range(clock[0], message['clock'][0]):
-                print(f'Requesting missing {name} message with clock {i}')
-                tcp_transmit_message('MSG', {'list': name, 'clock': [i]}, message['sender'])
-                clock[0] += 1
-
-            if clock[0] != message['clock'][0]:
-                raise ValueError(f'Clock is not correct, {clock =}')
-            multi_msgs[str(clock[0])] = {'command': message["command"], 'contents': message["contents"]}
+            # debug("multicast_listener", f"message: {message}")
+            # if message['sender'] == my_address or message['clock'][0] <= clock[0]:
+            #     continue
+            # debug("multicast_listener", f"address: {address}")
+            # print(f'Listener {name} received multicast command {message["command"]} from {message["sender"]}')
+            # m_listener_socket.sendto(b'ack', message["sender"])
+            command(message)
             if len(multi_msgs) > keep_msgs:
                 multi_msgs.pop(next(iter(multi_msgs)))
             parse_multicast(message, group)
