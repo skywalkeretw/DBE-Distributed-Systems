@@ -89,7 +89,7 @@ def tcp_transmit_message(command, contents, address):
     if command != 'PING':
         print(f'Sending command {command} to {address}')
     message_bytes = encode_message(command, server_address, contents)
-    tcp_transmit_message(message_bytes,     )
+    tcp_transmit_message(message_bytes, contents, address)
 
 
 def multicast_transmit_message(command, contents, group):
@@ -264,6 +264,34 @@ def startup_broadcast():
     if not got_response:
         print('No other Leader found')
         set_leader(server_address)
+
+def broadcast_listener():
+    """
+    broadcast_listener
+    Function to listen for broadcasts from peers and respond when a broadcast is heard
+    Only the leader responds to broadcasts
+    """
+    if leader_address[0] == get_ip_address() :
+        print(f'Leader up and running at {server_address}')
+
+    listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create UDP socket
+    listener_socket.bind(('', BROADCAST_PORT))
+    listener_socket.settimeout(2)
+
+    while is_active:
+        try:
+            data, address = listener_socket.recvfrom(BUFFER_SIZE)  # wait for a packet
+        except TimeoutError:
+            pass
+        else:
+            if is_leader and data.startswith(BROADCAST_CODE.encode()):
+                print(f'Received broadcast from {address[0]}, replying with response code')
+                # Respond with the response code, the IP we're responding to, and the the port we're listening with
+                listener_socket.sendto(str.encode(f'{RESPONSE_CODE}_{address[0]}_{server_address[1]}'), address)
+
+    print('Broadcast listener closing')
+    listener_socket.close()
+    sys.exit(0)
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
@@ -281,7 +309,7 @@ if __name__ == '__main__':
     # Server
     # Join Peer ring
     startup_broadcast()
-    #Thread(target=broadcast_listener).start()
+    Thread(target=broadcast_listener).start()
 
 #----
 
