@@ -144,26 +144,14 @@ def multicast_transmit_message(command, contents, group):
     m_sender_socket.settimeout(0.2)
     m_sender_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
 
-    responses = 0
 
     try:
         # Send message to the multicast group
         message_bytes = encode_message(command, my_address, contents)
         m_sender_socket.sendto(message_bytes, group)
-
-        # Look for responses from all recipients
-        while True:
-            try:
-                data, server = m_sender_socket.recvfrom(16)
-            except TimeoutError:
-                break
-            else:
-                responses += 1
     finally:
-        print(f'Received {responses} of {expected_responses} expected responses')
         m_sender_socket.close()
-        if group == MG.PEER and responses < expected_responses:
-            ping_peers()
+
 
     if len(multi_msgs) > keep_msgs:
         multi_msgs.pop(next(iter(multi_msgs)))
@@ -215,6 +203,8 @@ def transmit_state(address):
 
 # Receives the current server and client lists from the leader
 def receive_state(state):
+    """
+    """
     global peers, peer_multi_msgs
 
     peers = [my_address]        # Clear the server list (except for this server)
@@ -235,12 +225,10 @@ def command(message, cmd=False):
         cmd = message.split(":")[1]
         if cmd == "ip":
             print("> ", get_ip_address())
+        elif cmd == "clear":
+            clear_console()
         elif cmd == "my_uuid":
             print(">", my_uuid)
-        elif cmd == "participants_ring":
-            print("> ", participants_ring)        
-        elif cmd == "participants_list":
-            print("> ", participants_list)
         elif cmd == "neighbour":
             print("> ", get_neighbour(participants_ring, my_uuid))
         elif cmd == "is_leader":
@@ -582,20 +570,10 @@ def multicast_listener(group):
         except TimeoutError:
             pass
         else:
-            message = decode_message(data)
-            # If we've picked up our own message
-            # Or the message has a lower clock than the next expected message
-            # Ignore it
-            # debug("multicast_listener", f"message: {message}")
-            # if message['sender'] == my_address or message['clock'][0] <= clock[0]:
-            #     continue
-            # debug("multicast_listener", f"address: {address}")
-            # print(f'Listener {name} received multicast command {message["command"]} from {message["sender"]}')
-            # m_listener_socket.sendto(b'ack', message["sender"])
-            command(message)
-            if len(multi_msgs) > keep_msgs:
-                multi_msgs.pop(next(iter(multi_msgs)))
-            parse_multicast(message, group)
+            if address != my_address:
+                message = decode_message(data)
+                command(message)
+                parse_multicast(message, group)
 
     print(f'Multicast listener {name} closing')
     m_listener_socket.close()
