@@ -89,7 +89,11 @@ def tcp_transmit_message(command, contents, address):
     if command != 'PING':
         print(f'Sending command {command} to {address}')
     message_bytes = encode_message(command, my_address, contents)
-    tcp_transmit_message(message_bytes, contents, address)
+    transmit_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    transmit_socket.settimeout(1)
+    transmit_socket.connect(address)
+    transmit_socket.send(message_bytes)
+    transmit_socket.close()
 
 
 def multicast_transmit_message(command, contents, group):
@@ -265,7 +269,7 @@ def startup_broadcast():
     broadcast_socket.close()
     if not got_response:
         print('No other Leader found')
-        set_leader(server_address)
+        set_leader(my_address)
 
 def broadcast_listener():
     """
@@ -289,7 +293,9 @@ def broadcast_listener():
             if is_leader and data.startswith(BROADCAST_CODE.encode()):
                 print(f'Received broadcast from {address[0]}, replying with response code')
                 # Respond with the response code, the IP we're responding to, and the the port we're listening with
-                listener_socket.sendto(str.encode(f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'), address)
+                response_message = f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'
+                print(response_message)
+                listener_socket.sendto(str.encode(response_message), address)
 
     print('Broadcast listener closing')
     listener_socket.close()
@@ -302,8 +308,6 @@ server_socket = create_tcp_listener_socket()
 my_address = server_socket.getsockname() # to-do: rename to own address or peer_address
 
 # Lists for connected clients and servers
-# clients = []
-# servers = [server_address]  # Server list starts with this server in it
 peers = [my_address]  # Server list starts with this server in it
 
 # Main Function
