@@ -56,6 +56,9 @@ keep_msgs = 5
 
 # Utils
 
+def clear_console():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
 def debug(func, msg):
     """
     :param func: Function the debug statement is in
@@ -122,27 +125,6 @@ def tcp_transmit_message(command, contents, address):
     transmit_socket.connect(address)
     transmit_socket.send(message_bytes)
     transmit_socket.close()
-
-def tcp_listener():
-    """
-    tcp_listener:
-    Function to listen for tcp (unicast) messages
-    passes valid commands to server_command
-    """
-    tcp_listener_socket.settimeout(2)
-    while is_active:
-        try:
-            client, address = tcp_listener_socket.accept()
-        except TimeoutError:
-            pass
-        else:
-            message = decode_message(client.recv(BUFFER_SIZE))
-            if message['command'] != 'PING':  # We don't print pings since that would be a lot
-                print(f'Command {message["command"]} received from {message["sender"]}')
-            server_command(message)
-
-    print('Unicast listener closing')
-    tcp_listener_socket.close()
 
 
 def multicast_transmit_message(command, contents, group):
@@ -255,94 +237,115 @@ def receive_state(state):
 
     peer_multi_msgs = state["peer_multi_msgs"]
 
-def server_command(message):
+def command(message, cmd=False):
     """
     :param message:
 
-    server_command: 
+    command: 
     """
-    #print(f"Server Command: {message}")
-    match message:
-        # Sends the chat message to all clients
-        # The client is responsible for not printing messages it originally sent
-        case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
-            chat_message = {'chat_sender': sender, 'chat_contents': contents}
-            message_to_peers('CHAT', chat_message)
-        # Add the provided node to this server's list
-        # If the request came from the node to be added inform the other servers
-        # If the node is a server, send it the server and client lists
-        case {'command': 'JOIN',
-              'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-            if node_type == 'peer':
-                node_list = peers
-            else:
-                raise ValueError(f'Tried to add invalid node type: {node_type =}')
 
-            if inform_others:
-                message_to_peers('JOIN', format_join_quit(node_type, False, address))
-                message_to_peers('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
-                tcp_transmit_message('CLOCK', peer_clock, address)# todo: check to see if needed
-                transmit_state(address)# todo: check to see if needed                    
-
-            if address not in node_list:  # We NEVER want duplicates in our lists
-                print(f'Adding {address} to {node_type} list')
-                node_list.append(address)
-                find_neighbour()
-
-        # Remove the provided node to this server's list
-        # If the request came from the node to be removed inform the other servers
-        # If the node is a client, then inform the other clients
-        case {'command': 'QUIT',
-              'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-            if node_type == 'peer':
-                node_list = peers
-            else:
-                raise ValueError(f'Tried to remove invalid node type: {node_type =}')
-
-            if inform_others:
-                message_to_peers('QUIT', format_join_quit(node_type, False, address))
-            try:
-                print(f'Removing {address} from {node_type} list')
-                node_list.remove(address)
-                find_neighbour()
-                    
-            except ValueError:
-                print(f'{address} was not in {node_type} list')
-        # Calls a function to import the current state from the leader
-        # This is split of for readability and to keep global overwriting of the lists out of this function
-        case {'command': 'STATE', 'contents': state}:
-            receive_state(state)
-        # Receive a vote in the election
-        # If I get a vote for myself then I've won the election. If not, then vote
-        # If the leader has been elected then set the new leader
-        case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
-            if not leader_elected:
-                if address == my_address:
-                    set_leader(my_address)
+    if cmd:
+        cmd = message.split(":")[1]
+        if cmd == "ip":
+            print("> ", get_ip_address())
+        elif cmd == "my_uuid":
+            print(">", my_uuid)
+        elif cmd == "participants_ring":
+            print("> ", participants_ring)        
+        elif cmd == "participants_list":
+            print("> ", participants_list)
+        elif cmd == "neighbour":
+            print("> ", get_neighbour(participants_ring, my_uuid))
+        elif cmd == "is_leader":
+            if is_leader:
+                print(f"> You are Leader")
+        elif cmd == "toggle_debug":
+            global debug
+            debug_active = not debug_active
+            print(f"> debug is: {'active' if debug_active else 'disabled'}")
+    else:
+        #print(f"Server Command: {message}")
+        match message:
+            # Sends the chat message to all clients
+            # The client is responsible for not printing messages it originally sent
+            case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
+                chat_message = {'chat_sender': sender, 'chat_contents': contents}
+                message_to_peers('CHAT', chat_message)
+            # Add the provided node to this server's list
+            # If the request came from the node to be added inform the other servers
+            # If the node is a server, send it the server and client lists
+            case {'command': 'JOIN',
+                    'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
+                if node_type == 'peer':
+                    node_list = peers
                 else:
-                    vote(address)
-            else:
-                if address != my_address:
-                    set_leader(address)
-                    tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
-        # Replies with the requested message to the requesting server
-        case {'command': 'MSG', 'contents': {'list': list_type, 'clock': msg_clock}, 'sender': address}:
-            if list_type == 'peer':
-                multi_msgs = peer_multi_msgs
-            else:
-                ValueError(f'Message requested from invalid list, {list_type =}')
+                    raise ValueError(f'Tried to add invalid node type: {node_type =}')
 
-            message = multi_msgs[str(msg_clock[0])]
-            print(f'{message =}')
-            tcp_transmit_message(message['command'], message['contents'], address)
-        # Either shutdown just this server (for testing leader election)
-        # Or shutdown the whole chatroom
-        case {'command': 'DOWN', 'contents': inform_others}:
-            if inform_others:
-                tcp_msg_to_peers('DOWN')
-            print(f'Shutting down at {my_address}')
-            global is_active
-            is_active = False
+                if inform_others:
+                    message_to_peers('JOIN', format_join_quit(node_type, False, address))
+                    message_to_peers('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
+                    tcp_transmit_message('CLOCK', peer_clock, address)# todo: check to see if needed
+                    transmit_state(address)# todo: check to see if needed                    
+
+                if address not in node_list:  # We NEVER want duplicates in our lists
+                    print(f'Adding {address} to {node_type} list')
+                    node_list.append(address)
+                    find_neighbour()
+
+            # Remove the provided node to this server's list
+            # If the request came from the node to be removed inform the other servers
+            # If the node is a client, then inform the other clients
+            case {'command': 'QUIT',
+                    'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
+                if node_type == 'peer':
+                    node_list = peers
+                else:
+                    raise ValueError(f'Tried to remove invalid node type: {node_type =}')
+
+                if inform_others:
+                    message_to_peers('QUIT', format_join_quit(node_type, False, address))
+                try:
+                    print(f'Removing {address} from {node_type} list')
+                    node_list.remove(address)
+                    find_neighbour()
+                        
+                except ValueError:
+                    print(f'{address} was not in {node_type} list')
+            # Calls a function to import the current state from the leader
+            # This is split of for readability and to keep global overwriting of the lists out of this function
+            case {'command': 'STATE', 'contents': state}:
+                receive_state(state)
+            # Receive a vote in the election
+            # If I get a vote for myself then I've won the election. If not, then vote
+            # If the leader has been elected then set the new leader
+            case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
+                if not leader_elected:
+                    if address == my_address:
+                        set_leader(my_address)
+                    else:
+                        vote(address)
+                else:
+                    if address != my_address:
+                        set_leader(address)
+                        tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
+            # Replies with the requested message to the requesting server
+            case {'command': 'MSG', 'contents': {'list': list_type, 'clock': msg_clock}, 'sender': address}:
+                if list_type == 'peer':
+                    multi_msgs = peer_multi_msgs
+                else:
+                    ValueError(f'Message requested from invalid list, {list_type =}')
+
+                message = multi_msgs[str(msg_clock[0])]
+                print(f'{message =}')
+                tcp_transmit_message(message['command'], message['contents'], address)
+            # Either shutdown just this server (for testing leader election)
+            # Or shutdown the whole chatroom
+            case {'command': 'DOWN', 'contents': inform_others}:
+                if inform_others:
+                    tcp_msg_to_peers('DOWN')
+                print(f'Shutting down at {my_address}')
+                global is_active
+                is_active = False
 
 def set_leader(address):
     """
@@ -416,7 +419,7 @@ def get_ip_address():
 
 def parse_multicast(message, group):
     if group == MG.PEER:
-        server_command(message)
+        command(message)
     else:
         raise ValueError(f'Invalid multicast group, {group =}')
 
@@ -515,8 +518,27 @@ def broadcast_listener():
     print('Broadcast listener closing')
     listener_socket.close()
     sys.exit(0)
-#-------------------------------------------------------------------------------------------------------
 
+def tcp_listener():
+    """
+    tcp_listener:
+    Function to listen for tcp (unicast) messages
+    passes valid commands to command
+    """
+    tcp_listener_socket.settimeout(2)
+    while is_active:
+        try:
+            client, address = tcp_listener_socket.accept()
+        except TimeoutError:
+            pass
+        else:
+            message = decode_message(client.recv(BUFFER_SIZE))
+            if message['command'] != 'PING':  # We don't print pings since that would be a lot
+                print(f'Command {message["command"]} received from {message["sender"]}')
+            command(message)
+
+    print('Unicast listener closing')
+    tcp_listener_socket.close()
 
 def heartbeat():
     """
@@ -583,7 +605,7 @@ def multicast_listener(group):
                 continue
 
             print(f'Listener {name} received multicast command {message["command"]} from {message["sender"]}')
-            m_listener_socket.sendto(b'ack', address)
+            m_listener_socket.sendto(b'acxk', address)
 
             clock[0] += 1
             # Causal ordering doesn't really matter here.
@@ -603,6 +625,33 @@ def multicast_listener(group):
     print(f'Multicast listener {name} closing')
     m_listener_socket.close()
     sys.exit(0)
+
+def transmit_messages():
+    """
+    transmit_message: Function to handle sending messages to the server
+    """
+    while is_active:
+        message = input('\rYou: ')
+
+        # This clears the just entered message from the chat using escape characters
+        # Basic idea from here:
+        # https://stackoverflow.com/questions/44565704/how-to-clear-only-last-one-line-in-python-output-console
+        print(f'\033[A{" " * (len("You: " + message))}\033[A')
+
+        # If the flag has been changed while waiting for input, we exit
+        if not is_active:
+            sys.exit(0)
+
+        # Send message
+        if len(message) > BUFFER_SIZE / 10:
+            print('Message is too long')
+        elif len(message) == 0:
+            continue
+        elif message.startswith("cmd:"):
+            # client comand edit
+            command(message, True)
+        else:
+            message_to_peers('CHAT', message)
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
@@ -624,17 +673,4 @@ if __name__ == '__main__':
     Thread(target=heartbeat).start()
 
     Thread(target=multicast_listener, args=(MG.PEER,)).start()
-#----
-
-
-    
-    # Thread(target=multicast_listener, args=(MG.SERVER,)).start()
-    # Thread(target=multicast_listener, args=(MG.CLIENT,)).start()
-
-    # # Client
-    # clear_output()
-    # #broadcast_for_server()
-
-    # Thread(target=transmit_messages).start()
-    # #Thread(target=tcp_listener).start() # fin
-    # #Thread(target=multicast_listener).start()
+    Thread(target=transmit_messages).start()
