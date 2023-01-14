@@ -211,6 +211,21 @@ def transmit_state(address):
              'peer_multi_msgs': peer_multi_msgs}
     tcp_transmit_message('STATE', state, address)
 
+
+# Receives the current server and client lists from the leader
+# Will be expanded later for clocks
+def receive_state(state):
+    global peers, peer_clock, peer_multi_msgs
+
+    peers = [my_address]        # Clear the server list (except for this server)
+    peers.extend(state["peers"])  # Add the received list to the servers
+    peers = list(set(peers))      # Remove any duplicates
+    find_neighbour()                   # Find neighbour (also takes care of sorting)
+
+    peer_clock[0] = state["peer_clock"][0]
+
+    peer_multi_msgs = state["peer_multi_msgs"]
+
 def server_command(message):
     """
     :param message:
