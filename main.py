@@ -88,7 +88,7 @@ def tcp_transmit_message(command, contents, address):
     """
     if command != 'PING':
         print(f'Sending command {command} to {address}')
-    message_bytes = encode_message(command, server_address, contents)
+    message_bytes = encode_message(command, my_address, contents)
     tcp_transmit_message(message_bytes, contents, address)
 
 
@@ -121,7 +121,7 @@ def multicast_transmit_message(command, contents, group):
 
     try:
         # Send message to the multicast group
-        message_bytes = encode_message(command, server_address, contents, clock)
+        message_bytes = encode_message(command, my_address, contents, clock)
         m_sender_socket.sendto(message_bytes, group)
 
         # Look for responses from all recipients
@@ -173,13 +173,13 @@ def set_leader(address):
     """
     global leader_address, is_leader, is_voting
     leader_address = address
-    is_leader = leader_address == server_address
+    is_leader = leader_address == my_address
     is_voting = False
     if is_leader:
         print('I am the leader')
         message_to_peers('LEAD')
         if neighbor:
-            tcp_transmit_message('VOTE', {'vote_for': server_address, 'leader_elected': True}, neighbor)
+            tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbor)
     else:
         print(f'The leader is {leader_address}')
 
@@ -234,6 +234,7 @@ def startup_broadcast():
     startup_broadcast Broadcasts looking for another active Peer acting as Leader 
 
     """
+    # Create UDP Broadcast socket
     broadcast_socket = create_udp_broadcast_listener_socket(timeout=1)
 
     got_response = False
@@ -241,6 +242,7 @@ def startup_broadcast():
     # 5 attempts are made to find another server
     # After this, the server assumes it is the only one and considers itself leader
     for i in range(0, SERVER_BROADCAST_ATTEMPTS):
+        #Broadcast message looking for a leader
         broadcast_socket.sendto(BROADCAST_CODE.encode(), ('<broadcast>', BROADCAST_PORT))
         print("Looking for Leader")
 
@@ -248,11 +250,11 @@ def startup_broadcast():
         try:
             data, address = broadcast_socket.recvfrom(BUFFER_SIZE)
             # RandomResponseCode_IPAddressFromLeader
-            if data.startswith(f'{RESPONSE_CODE}_{server_address[0]}'.encode()):
+            if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):
+                
                 print("Found Leader at", address[0])
                 response_port = int(data.decode().split('_')[2])
-                # todo: set node_type as peer
-                join_contents = format_join_quit('client', True, server_address)
+                join_contents = format_join_quit('peer', True, my_address)
                 tcp_transmit_message('JOIN', join_contents, (address[0], response_port))
                 got_response = True
                 set_leader((address[0], response_port))
@@ -272,9 +274,9 @@ def broadcast_listener():
     Only the leader responds to broadcasts
     """
     if leader_address[0] == get_ip_address() :
-        print(f'Leader up and running at {server_address}')
+        print(f'Leader up and running at -> {my_address[0]}:{my_address[1]}')
 
-    listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # create UDP socket
+    listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  
     listener_socket.bind(('', BROADCAST_PORT))
     listener_socket.settimeout(2)
 
@@ -287,7 +289,7 @@ def broadcast_listener():
             if is_leader and data.startswith(BROADCAST_CODE.encode()):
                 print(f'Received broadcast from {address[0]}, replying with response code')
                 # Respond with the response code, the IP we're responding to, and the the port we're listening with
-                listener_socket.sendto(str.encode(f'{RESPONSE_CODE}_{address[0]}_{server_address[1]}'), address)
+                listener_socket.sendto(str.encode(f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'), address)
 
     print('Broadcast listener closing')
     listener_socket.close()
@@ -297,12 +299,12 @@ def broadcast_listener():
 # Create TCP socket for listening to unicast messages
 # The address tuple of this socket is the unique identifier for the server
 server_socket = create_tcp_listener_socket()
-server_address = server_socket.getsockname() # to-do: rename to own address or peer_address
+my_address = server_socket.getsockname() # to-do: rename to own address or peer_address
 
 # Lists for connected clients and servers
 # clients = []
 # servers = [server_address]  # Server list starts with this server in it
-peers = [server_address]  # Server list starts with this server in it
+peers = [my_address]  # Server list starts with this server in it
 
 # Main Function
 if __name__ == '__main__':
