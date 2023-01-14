@@ -41,8 +41,8 @@ neighbour = None
 is_active = True
 
 # Counts for server and client multicasts
-server_clock = [0]
-client_clock = [0]
+peer_clock = [0]
+# in case leader_clock necessary?
 
 # Dict for the peer mulitcast messages
 peer_multi_msgs = {}
@@ -129,7 +129,7 @@ def multicast_transmit_message(command, contents, group):
         expected_responses = len_other_peers
         send_to = 'peers'
         multi_msgs = peer_multi_msgs
-        clock = server_clock
+        clock = peer_clock
     else:
         raise ValueError('Invalid multicast group')
      
@@ -159,7 +159,7 @@ def multicast_transmit_message(command, contents, group):
     finally:
         print(f'Received {responses} of {expected_responses} expected responses')
         m_sender_socket.close()
-        if group == MG.CLIENT and responses < expected_responses:
+        if group == MG.PEER and responses < expected_responses:
             ping_peers()
 
     multi_msgs[str(clock[0])] = {'command': command, 'contents': contents}
@@ -169,9 +169,12 @@ def multicast_transmit_message(command, contents, group):
 def message_to_peers(command, contents=''):
     multicast_transmit_message(command, contents, MG.PEER)
 
-# If a specific client is provided, ping that client
-# Otherwise ping all clients
+
 def ping_peers(peer_to_ping=None):
+    """
+    ping_peers: If a specific client is provided, ping that client
+    Otherwise ping all clients
+    """
     if peer_to_ping:
         to_ping = [peer_to_ping]
     else:
@@ -200,30 +203,42 @@ def tcp_msg_to_peers(command, contents=''):
         except (ConnectionRefusedError, TimeoutError):
             print(f'Unable to send to {peers}')
 
+# Transmits the current server and client lists from the leader to the new server
+# Will be expanded later for clocks
+def transmit_state(address):
+    state = {'peers': peers,
+             'peer_clock': peer_clock,
+             'peer_multi_msgs': peer_multi_msgs}
+    tcp_transmit_message('STATE', state, address)
+
 def server_command(message):
+    """
+    :param message:
+
+    server_command: 
+    """
+    print(f"Server Command: {message}")
     match message:
         # Sends the chat message to all clients
         # The client is responsible for not printing messages it originally sent
         case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
             chat_message = {'chat_sender': sender, 'chat_contents': contents}
-            message_to_clients('CHAT', chat_message)
+            message_to_peers('CHAT', chat_message)
         # Add the provided node to this server's list
         # If the request came from the node to be added inform the other servers
         # If the node is a server, send it the server and client lists
         case {'command': 'JOIN',
               'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-            if node_type == 'server':
-                node_list = servers
-            elif node_type == 'client':
-                node_list = clients
+            if node_type == 'peer':
+                node_list = peers
             else:
                 raise ValueError(f'Tried to add invalid node type: {node_type =}')
 
             if inform_others:
-                message_to_servers('JOIN', format_join_quit(node_type, False, address))
+                message_to_peers('JOIN', format_join_quit(node_type, False, address))
                 if node_type == 'client':
-                    message_to_clients('SERV', f'{address[0]} has joined the chat')
-                    tcp_transmit_message('CLOCK', client_clock, address)
+                    message_to_peers('SERV', f'{address[0]} has joined the chat')
+                    tcp_transmit_message('CLOCK', peer_clock, address)
                 elif node_type == 'server':
                     transmit_state(address)
 
@@ -231,28 +246,24 @@ def server_command(message):
                 print(f'Adding {address} to {node_type} list')
                 node_list.append(address)
                 if node_type == 'server':
-                    find_neighbor()
+                    find_neighbour()
         # Remove the provided node to this server's list
         # If the request came from the node to be removed inform the other servers
         # If the node is a client, then inform the other clients
         case {'command': 'QUIT',
               'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-            if node_type == 'server':
-                node_list = servers
-            elif node_type == 'client':
-                node_list = clients
+            if node_type == 'peer':
+                node_list = peers
             else:
                 raise ValueError(f'Tried to remove invalid node type: {node_type =}')
 
             if inform_others:
-                if node_type == 'client':
-                    message_to_clients('SERV', f'{address[0]} has left the chat')
-                message_to_servers('QUIT', format_join_quit(node_type, False, address))
+                message_to_peers('QUIT', format_join_quit(node_type, False, address))
             try:
                 print(f'Removing {address} from {node_type} list')
                 node_list.remove(address)
                 if node_type == 'server':
-                    find_neighbor()
+                    find_neighbour()
             except ValueError:
                 print(f'{address} was not in {node_type} list')
         # Calls a function to import the current state from the leader
@@ -264,20 +275,18 @@ def server_command(message):
         # If the leader has been elected then set the new leader
         case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
             if not leader_elected:
-                if address == server_address:
-                    set_leader(server_address)
+                if address == my_address:
+                    set_leader(my_address)
                 else:
                     vote(address)
             else:
-                if address != server_address:
+                if address != my_address:
                     set_leader(address)
-                    tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbor)
+                    tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
         # Replies with the requested message to the requesting server
         case {'command': 'MSG', 'contents': {'list': list_type, 'clock': msg_clock}, 'sender': address}:
-            if list_type == 'server':
-                multi_msgs = server_multi_msgs
-            elif list_type == 'client':
-                multi_msgs = client_multi_msgs
+            if list_type == 'peer':
+                multi_msgs = peer_multi_msgs
             else:
                 ValueError(f'Message requested from invalid list, {list_type =}')
 
@@ -288,9 +297,8 @@ def server_command(message):
         # Or shutdown the whole chatroom
         case {'command': 'DOWN', 'contents': inform_others}:
             if inform_others:
-                tcp_msg_to_clients('DOWN')
-                tcp_msg_to_servers('DOWN')
-            print(f'Shutting down server at {server_address}')
+                tcp_msg_to_peers('DOWN')
+            print(f'Shutting down at {my_address}')
             global is_active
             is_active = False
 
