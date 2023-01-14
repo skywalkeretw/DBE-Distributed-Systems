@@ -225,6 +225,7 @@ def tcp_msg_to_peers(command, contents=''):
     """
     tcp_msg_to_peers: Sends message to all peer members
      """
+    global peers
     for peers in [p for p in peers if p != my_address]:
         try:
             tcp_transmit_message(command, contents, peers)
@@ -260,7 +261,7 @@ def server_command(message):
 
     server_command: 
     """
-    print(f"Server Command: {message}")
+    #print(f"Server Command: {message}")
     match message:
         # Sends the chat message to all clients
         # The client is responsible for not printing messages it originally sent
@@ -279,17 +280,15 @@ def server_command(message):
 
             if inform_others:
                 message_to_peers('JOIN', format_join_quit(node_type, False, address))
-                if node_type == 'client':
-                    message_to_peers('SERV', f'{address[0]} has joined the chat')
-                    tcp_transmit_message('CLOCK', peer_clock, address)
-                elif node_type == 'server':
-                    transmit_state(address)
+                message_to_peers('SERV', f'{address[0]} has joined the chat') # todo: check to see if needed
+                tcp_transmit_message('CLOCK', peer_clock, address)# todo: check to see if needed
+                transmit_state(address)# todo: check to see if needed                    
 
             if address not in node_list:  # We NEVER want duplicates in our lists
                 print(f'Adding {address} to {node_type} list')
                 node_list.append(address)
-                if node_type == 'server':
-                    find_neighbour()
+                find_neighbour()
+
         # Remove the provided node to this server's list
         # If the request came from the node to be removed inform the other servers
         # If the node is a client, then inform the other clients
@@ -305,8 +304,8 @@ def server_command(message):
             try:
                 print(f'Removing {address} from {node_type} list')
                 node_list.remove(address)
-                if node_type == 'server':
-                    find_neighbour()
+                find_neighbour()
+                    
             except ValueError:
                 print(f'{address} was not in {node_type} list')
         # Calls a function to import the current state from the leader
@@ -381,7 +380,7 @@ def find_neighbour():
 
 def vote(address):
     """
-    :param address: my_address needs to bet set
+    :param address: Address to Vote for (vote for myself my_address)
 
     vote: starts voting by setting is_voting to true and sending a vote to neighbour
     ff we're the only peer, we win the vote automatically
@@ -523,6 +522,7 @@ def heartbeat():
     """
     heartbeat: Function to ping the neighbour, and respond if unable to do so
     """
+    global peers
     missed_beats = 0
     while is_active:
         # find_neighbour()
@@ -539,14 +539,18 @@ def heartbeat():
                 missed_beats = 0
             if missed_beats > 4:                                                         # Once 5 beats have been missed
                 print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')     # print to console
-                peers.remove(neighbour)                                                 # remove the missing server
+                # remove the missing server
+                peers.remove(neighbour)                                            
                 missed_beats = 0                                                         # reset the count
                 tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))     # inform the others
-                neighbour_was_leader = neighbour == leader_address                         # check if neighbour was leader
                 find_neighbour()                                                          # find a new neighbour
-                if neighbour_was_leader:                                                  # if the neighbour was leader
+                #check if neighbour was leader if the neighbour was leader
+                debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
+                neighbour_was_leader = neighbour == leader_address
+                debug("heartbeat", f"{neighbour_was_leader}")
+                if neighbour_was_leader or not neighbour:                                                  
                     print('Previous neighbour was leader, starting election')             # print to console
-                    vote()                                                               # start an election
+                    vote(my_address)                                                               # start an election
 
     print('Heartbeat thread closing')
     sys.exit(0)
