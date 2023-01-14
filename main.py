@@ -102,17 +102,16 @@ def multicast_transmit_message(command, contents, group):
     """
     len_other_peers = len(peers) - 1 # We expect responses from every other than the sender
 
-    match group:
-        case MG.PEER:
-            if not len_other_peers:  # If there are no other servers, don't bother transmitting
-                return
-            expected_responses = len_other_peers
-            send_to = 'peers'
-            multi_msgs = peer_multi_msgs
-            clock = server_clock
-        case _:
-            raise ValueError('Invalid multicast group')
-
+    if group == MG.PEER:
+        if not len_other_peers:  # If there are no other servers, don't bother transmitting
+            return
+        expected_responses = len_other_peers
+        send_to = 'peers'
+        multi_msgs = peer_multi_msgs
+        clock = server_clock
+    else:
+        raise ValueError('Invalid multicast group')
+     
     clock[0] += 1
     print(f'Sending multicast command {command} to {send_to} with clock {clock[0]}')
 
@@ -170,10 +169,19 @@ def ping_peers(peer_to_ping=None):
             except ValueError:
                 print(f'{peer} was not in peers')
 
+def tcp_msg_to_peers(command, contents=''):
+    """
+    tcp_msg_to_peers: Sends message to all peer members
+     """
+    for peers in [p for p in peers if p != my_address]:
+        try:
+            tcp_transmit_message(command, contents, peers)
+        except (ConnectionRefusedError, TimeoutError):
+            print(f'Unable to send to {peers}')
 
 def set_leader(address):
     """
-    set_leader
+    set_leader: 
     """
     global leader_address, is_leader, is_voting
     leader_address = address
@@ -187,6 +195,42 @@ def set_leader(address):
     else:
         print(f'The leader is {leader_address}')
 
+def find_neighbor():
+    """
+    Figuring out who is our neighbor 
+    Our neighbor is the server with the next highest address
+    The neighbors are used for crash fault tolerance and for voting
+    """
+    global neighbor
+    length = len(peers)
+    if length == 1:
+        neighbor = None
+        print('I have no neighbor')
+        return
+    peers.sort()
+    index = peers.index(my_address)
+    neighbor = peers[0] if index + 1 == length else peers[index + 1]
+    print(f'My neighbor is {neighbor}')
+
+
+def vote(address):
+    """
+    :param address: my_address needs to bet set
+
+    vote: starts voting by setting is_voting to true and sending a vote to neighbor
+    ff we're the only peer, we win the vote automatically
+    if we're the first peer to vote, this will start the whole election
+    and we just vote for ourself
+    otherwise, we vote for the max out of our address and the vote we received
+    """
+    if not neighbor:
+        set_leader(my_address)
+        return
+    global is_voting
+    vote_for = max(address, my_address)
+    if vote_for != my_address or not is_voting:
+        tcp_transmit_message('VOTE', {'vote_for': vote_for, 'leader_elected': False}, neighbor)
+    is_voting = True
 
 def get_ip_address():
     """
@@ -292,6 +336,7 @@ def broadcast_listener():
         else:
             if is_leader and data.startswith(BROADCAST_CODE.encode()):
                 print(f'Received broadcast from {address[0]}, replying with response code')
+                print("Peers: ", peers) # todo: remove when finshed debuging
                 # Respond with the response code, the IP we're responding to, and the the port we're listening with
                 response_message = f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'
                 print(response_message)
@@ -299,6 +344,36 @@ def broadcast_listener():
 
     print('Broadcast listener closing')
     listener_socket.close()
+    sys.exit(0)
+#-------------------------------------------------------------------------------------------------------
+
+
+def heartbeat():
+    """
+    heartbeat: Function to ping the neighbor, and respond if unable to do so
+    """
+    missed_beats = 0
+    while is_active:
+        if neighbor:
+            try:
+                tcp_transmit_message('PING', '', neighbor)
+                sleep(0.2)
+            except (ConnectionRefusedError, TimeoutError):
+                missed_beats += 1
+            else:
+                missed_beats = 0
+            if missed_beats > 4:                                                         # Once 5 beats have been missed
+                print(f'{missed_beats} failed pings to neighbor, remove {neighbor}')     # print to console
+                peers.remove(neighbor)                                                 # remove the missing server
+                missed_beats = 0                                                         # reset the count
+                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbor))  # inform the others
+                neighbor_was_leader = neighbor == leader_address                         # check if neighbor was leader
+                find_neighbor()                                                          # find a new neighbor
+                if neighbor_was_leader:                                                  # if the neighbor was leader
+                    print('Previous neighbor was leader, starting election')             # print to console
+                    vote()                                                               # start an election
+
+    print('Heartbeat thread closing')
     sys.exit(0)
 #-------------------------------------------------------------------------------------------------------
 
@@ -317,10 +392,12 @@ if __name__ == '__main__':
     startup_broadcast()
     Thread(target=broadcast_listener).start()
 
+    Thread(target=tcp_listener).start()
+    Thread(target=heartbeat).start()
+
 #----
 
-    # Thread(target=tcp_listener).start()
-    # Thread(target=heartbeat).start()
+
     
     # Thread(target=multicast_listener, args=(MG.SERVER,)).start()
     # Thread(target=multicast_listener, args=(MG.CLIENT,)).start()
