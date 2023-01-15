@@ -22,7 +22,7 @@ BROADCAST_CODE = 'mgay2su4peecmsreducv7vaez8ceacnc'
 RESPONSE_CODE = 'xe3uyyqpvtwv234hrgsarcwjkbev8ywy'
 
 # Number of broadcasts made by a peer at startup
-SERVER_BROADCAST_ATTEMPTS = 5
+JOIN_BROADCAST_ATTEMPTS = 5
 
 
 # Addresses for multicast group
@@ -371,7 +371,7 @@ def format_join_quit(node_type, inform_others, address):
 
 #-------------------------------------------------------------------------------------------------------
 
-# Server Functions
+# Peer Functions
 
 def startup_broadcast():
     """
@@ -385,7 +385,7 @@ def startup_broadcast():
 
     # 5 attempts are made to find another leader
     # After this, the peer assumes it is the only one and considers itself leader
-    for i in range(0, SERVER_BROADCAST_ATTEMPTS):
+    for i in range(0, JOIN_BROADCAST_ATTEMPTS):
         #Broadcast message looking for a leader
         broadcast_socket.sendto(BROADCAST_CODE.encode(), ('<broadcast>', BROADCAST_PORT))
         print("Looking for Leader")
@@ -598,7 +598,6 @@ peers = [my_address]  # Peers list starts with this peer in it
 
 # Main Function
 if __name__ == '__main__':
-    # Server
     # Join Peer ring
     startup_broadcast()
     Thread(target=broadcast_listener).start()
