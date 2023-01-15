@@ -95,6 +95,7 @@ def info_help():
     out_cmd("cmd:clear => Clears the Console")
     out_cmd("cmd:ip => Shows you your IP Address")
     out_cmd("cmd:ports => Get Broadcast Port and Multicast Port")
+    out_cmd("cmd:peers => Shows the list of particpating peers")
     out_cmd("cmd:neighbour => Shows you your neighbour")
     out_cmd("cmd:is_leader => Shows you if you are a leader or a participant")
     out_cmd("cmd:toggle_debug => Activates the debug mode")
@@ -232,6 +233,8 @@ def command(message, cmd=False):
             out_cmd(f"Your Neighbour: {find_neighbour()}")
         elif cmd == "is_leader":
             out_cmd(f"You are Leader" if is_leader else f"You are Participant")
+        elif cmd == "peers":
+            out_cmd(f"List of peers: {peers}")
         elif cmd == "toggle_debug":
             global debug_active
             debug_active = not debug_active
@@ -270,8 +273,7 @@ def command(message, cmd=False):
             # Remove the provided node from the peer list
             # If the request came from the node to be removed inform the other peers
             # If the node is a client, then inform the other clients
-            case {'command': 'QUIT',
-                    'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
+            case {'command': 'QUIT', 'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
                 if node_type != 'peer':
                     raise ValueError(f'Tried to remove invalid node type: {node_type =}')
 
@@ -279,6 +281,7 @@ def command(message, cmd=False):
                     multicast_transmit_message('QUIT', format_join_quit(node_type, False, address))
                 try:
                     debug("command", f'Removing {address} from {node_type} list')
+                    out_info(f"({address[0]}): Left the Chat")
                     peers.remove(address)
                     find_neighbour()
                         
@@ -539,6 +542,7 @@ def heartbeat():
                 debug("heartbeat", f"Peers {peers}")                                   
                 tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
                 previous_neighbour = neighbour
+                out_info(f"({previous_neighbour[0]}): Left the Chat")
                 find_neighbour()                                                             
                 #check if neighbour was leader if the neighbour was leader
                 debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
