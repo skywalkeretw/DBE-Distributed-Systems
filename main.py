@@ -483,20 +483,21 @@ def heartbeat():
             else:
                 missed_beats = 0
             if missed_beats > 4:                                                             # Once 5 beats have been missed
-                print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
+                debug("heartbeat", f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
                 # remove the missing peer
                 debug("heartbeat", f"Peers :{peers}")
                 peers.remove(neighbour)
                 debug("heartbeat", f"Peers {peers}")                                   
-                missed_beats = 0                                                             # reset the count
+                missed_beats = 0 
+                debug("heartbeat", f"Peers {peers}")                                   
                 tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
-                find_neighbour()                                                             
+                # find_neighbour()                                                             
                 #check if neighbour was leader if the neighbour was leader
                 debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
                 neighbour_was_leader = neighbour == leader_address
                 debug("heartbeat", f"{neighbour_was_leader}")
                 if neighbour_was_leader or not neighbour:                                                  
-                    print('Previous neighbour was leader, starting election')                 # print to console
+                    debug("heartbeat",'Previous neighbour was leader, starting election')                 # print to console
                     vote(my_address)                                                          # start an election
 
     print('Heartbeat thread closing')
