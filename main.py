@@ -303,12 +303,15 @@ def command(message, cmd=False):
         elif command == 'VOTE':
             # Receive a vote in the election
             # If I get a vote for myself then I've won the election. If not, then vote
+            # LaLann-Chang-Roberts
             address, leader_elected = contents['vote_for'], contents['leader_elected']
             if not leader_elected:
-                if address == my_address:
+                if address > my_address:
+                     vote(address)
+                elif address == my_address:
                     set_leader(my_address)
                 else:
-                    vote(address)
+                    vote(my_address)
             else:
                 if address != my_address:
                     set_leader(address)
