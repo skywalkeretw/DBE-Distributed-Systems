@@ -1,5 +1,13 @@
 # DBE-Distributed-Systems
 
+Peer to Peer Chat application in Python 
+requires python 3.10
+
+Run the system
+```bash
+    python main.py
+```
+
 ## git
 
 ### Check status
