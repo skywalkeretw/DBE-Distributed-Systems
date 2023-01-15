@@ -443,10 +443,10 @@ def startup_broadcast():
         try:
             data, address = broadcast_socket.recvfrom(BUFFER_SIZE)
             debug("startup_broadcast", f"data{decode_message(data)}")
-            if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):
+            if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):                
                 debug("startup_broadcast", f"Found Leader at {address[0]}")
                 response_port = int(data.decode().split('_')[2])
-                join_contents = format_join_quit('peer', True, my_address)
+                join_contents = format_join_quit(True, my_address)
                 tcp_transmit_message('JOIN', join_contents, (address[0], response_port))
                 got_response = True
                 set_leader((address[0], response_port))
@@ -531,7 +531,7 @@ def heartbeat():
                 debug("heartbeat", f"Peers {peers}")                                   
                 missed_beats = 0 
                 debug("heartbeat", f"Peers {peers}")                                   
-                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour)) 
+                tcp_msg_to_peers('QUIT', format_join_quit(False, neighbour)) 
                 previous_neighbour = neighbour
                 out_info(f"({previous_neighbour[0]}): Left the Chat")
                 find_neighbour()                                                             
@@ -566,7 +566,7 @@ def ping_peers(peer_to_ping=None):
             debug(f'Peers: {peers}')
             try:
                 peers.remove(peers)
-                multicast_transmit_message('QUIT', format_join_quit('client', False, peer))
+                multicast_transmit_message('QUIT', format_join_quit(False, peer))
             except ValueError:
                 debug("ping_peers", f'{peer} was not in peers')
 
