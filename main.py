@@ -257,16 +257,15 @@ def command(message, cmd=False):
             case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
                 # Print message form other peers
                 print(f"({sender[0]}): {contents}")
+
             case {'command': 'JOIN', 'contents': {'inform_others': inform_others, 'address': address}}:
                 # Add the provided node to this peers list
                 # If the request came from the node to be added inform the other peers
                 # send it to the peer lists
-
                 if inform_others:
-                    # return Peer list
                     tcp_transmit_message('STATE', {'peers': peers}, address)  
                     # inform Peers about new Peer
-                    multicast_transmit_message('JOIN', format_join_quit( False, address))            
+                    multicast_transmit_message('JOIN', format_join_quit(False, address))            
 
                 if address not in peers:
                     debug("not in",f'Adding {address} to {peers}')
@@ -274,10 +273,9 @@ def command(message, cmd=False):
                     peers.append(address)
                     find_neighbour()
 
-            # Remove the provided node from the peer list
-            # If the request came from the node to be removed inform the other peers
-            # If the node is a client, then inform the other clients
             case {'command': 'QUIT', 'contents': {'inform_others': inform_others, 'address': address}}:
+                # Remove the provided node from the peer list
+                # If the request came from the node to be removed inform the other peers
                 if inform_others:
                     multicast_transmit_message('QUIT', format_join_quit(False, address))
                 try:
@@ -285,11 +283,9 @@ def command(message, cmd=False):
                     out_info(f"({address[0]}): Left the Chat")
                     peers.remove(address)
                     find_neighbour()
-                        
                 except ValueError:
                     debug("command", f'{address} was not in {peers}')
-            # Calls a function to import the current state from the leader
-            # This is split of for readability and to keep global overwriting of the lists out of this function
+
             case {'command': 'STATE', 'contents': state}:
                 # Clear the peers list (except for this peer)
                 peers = [my_address]
@@ -297,14 +293,14 @@ def command(message, cmd=False):
                 # Add the received list to the peers
                 peers.extend(state["peers"])
                 debug("command", f"STATE peers: {peers}")
-                #Remove any duplicates from the peers
+                # Remove any duplicates from the peers
                 peers = list(set(peers))
                 debug("command", f"STATE peers: {peers}")
                 find_neighbour()
-            # Receive a vote in the election
-            # If I get a vote for myself then I've won the election. If not, then vote
-            # If the leader has been elected then set the new leader
+
             case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
+                # Receive a vote in the election
+                # If I get a vote for myself then I've won the election. If not, then vote
                 if not leader_elected:
                     if address == my_address:
                         set_leader(my_address)
@@ -317,9 +313,9 @@ def command(message, cmd=False):
 
 def set_leader(address):
     """
-    :param address:
+    :param address: Leader Address
 
-    set_leader: 
+    set_leader: Sets the leader and informs peers
     """
     global leader_address, is_leader, is_voting
     leader_address = address
@@ -345,6 +341,7 @@ def find_neighbour():
         neighbour = None
         debug("find_neighbour", 'I have no neighbour')
         return
+
     debug("find_neighbour", f"Peers: {peers}")
     peers.sort()
     index = peers.index(my_address)
@@ -357,17 +354,18 @@ def vote(address):
     :param address: Address to Vote for (vote for myself my_address)
 
     vote: starts voting by setting is_voting to true and sending a vote to neighbour
-    ff we're the only peer, we win the vote automatically
+    if we're the only peer, we win the vote automatically
     if we're the first peer to vote, this will start the whole election
-    and we just vote for ourself
-    otherwise, we vote for the max out of our address and the vote we received
+    and we just vote for ourself otherwise, we vote for the max out of our address and the vote we received
     """
     if not neighbour:
+        debug("vote", f"Voted for {my_address}")
         set_leader(my_address)
         return
     global is_voting
     vote_for = max(address, my_address)
     if vote_for != my_address or not is_voting:
+        debug("vote", f"Vote for {vote_for}")
         tcp_transmit_message('VOTE', {'vote_for': vote_for, 'leader_elected': False}, neighbour)
     is_voting = True
 
@@ -375,7 +373,7 @@ def get_ip_address():
     """
     :return Computers IP address
     
-    get_ip_address Returns the IP address of the System
+    get_ip_address: Returns the IP address of the System
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -393,29 +391,35 @@ def get_ip_address():
 
 def encode_message(command, sender, contents=''):
     """
-    :param command:
-    :param sender:
-    :param contents:
+    :param command: Command to be used
+    :param sender: Sender of the message
+    :param contents: Data
 
-    encode_message
+    :return encoded message 
+
+    encode_message: creates Dict and encodes it as binary
     """
     message_dict = {'command': command, 'sender': sender, 'contents': contents}
     return repr(message_dict).encode()
 
 def decode_message(message):
     """
-    :param message:
+    :param message: encoded message
 
-    decode_message
+    :return decoded message as dict
+
+    decode_message: decodes a encoded binary dict and returns it
     """
     return ast.literal_eval(message.decode())
 
 def format_join_quit(inform_others, address):
     """
-    :param inform_others:
-    :param address:
+    :param inform_others: bool variable if other should be informed
+    :param address: Target adress to send to
     
-    format_join_quit returns 
+    :return dict 
+
+    format_join_quit: returns a dict containing  inform_others and target address
     """
     return {'inform_others': inform_others, 'address': address}
 
@@ -425,27 +429,21 @@ def format_join_quit(inform_others, address):
 
 def startup_broadcast():
     """
-    startup_broadcast Broadcasts looking for another active Peer acting as Leader 
-
+    startup_broadcast: Broadcasts looking for another active Peer acting as Leader 
+    or sets self to leader after 5 retries if no leader is available
     """
-    # Create UDP Broadcast socket
     broadcast_socket = create_udp_broadcast_listener_socket(timeout=1)
-
     got_response = False
 
-    # 5 attempts are made to find another leader
-    # After this, the peer assumes it is the only one and considers itself leader
     for i in range(0, JOIN_BROADCAST_ATTEMPTS):
         #Broadcast message looking for a leader
         broadcast_socket.sendto(BROADCAST_CODE.encode(), ('<broadcast>', BROADCAST_PORT))
         debug("startup_broadcast", "Looking for Leader")
-
         # Wait for a response packet. If no packet has been received in 1 second, broadcast again
         try:
             data, address = broadcast_socket.recvfrom(BUFFER_SIZE)
-            # RandomResponseCode_IPAddressFromLeader
+            debug("startup_broadcast", f"data{decode_message(data)}")
             if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):
-                
                 debug("startup_broadcast", f"Found Leader at {address[0]}")
                 response_port = int(data.decode().split('_')[2])
                 join_contents = format_join_quit('peer', True, my_address)
@@ -463,9 +461,8 @@ def startup_broadcast():
 
 def broadcast_listener():
     """
-    broadcast_listener
-    Function to listen for broadcasts from peers and respond when a broadcast is heard
-    Only the leader responds to broadcasts
+    broadcast_listener:
+    Function to listen for broadcasts from peers and respond when a broadcast Only the leader responds 
     """
     if leader_address[0] == get_ip_address() :
         debug("broadcast_listener", f'Leader up and running at -> {my_address[0]}:{my_address[1]}')
@@ -476,14 +473,13 @@ def broadcast_listener():
 
     while is_active:
         try:
-            data, address = listener_socket.recvfrom(BUFFER_SIZE)  # wait for a packet
+            data, address = listener_socket.recvfrom(BUFFER_SIZE)  
         except TimeoutError:
             pass
         else:
             if is_leader and data.startswith(BROADCAST_CODE.encode()):
                 debug("broadcast_listener",f'Received broadcast from {address[0]}, replying with response code')
-                debug("broadcast_listener",f"Peers: {peers}",) # todo: remove when finshed debuging
-                # Respond with the response code, the IP we're responding to, and the the port we're listening with
+                debug("broadcast_listener",f"Peers: {peers}",)
                 response_message = f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'
                 debug("broadcast_listener",response_message)
                 listener_socket.sendto(str.encode(response_message), address)
@@ -496,7 +492,7 @@ def tcp_listener():
     """
     tcp_listener:
     Function to listen for tcp (unicast) messages
-    passes valid commands to command
+    passes valid commands to command function to evaluate and act on
     """
     tcp_listener_socket.settimeout(2)
     while is_active:
@@ -520,10 +516,6 @@ def heartbeat():
     global peers
     missed_beats = 0
     while is_active:
-        # find_neighbour()
-        # if neighbour and neighbour != my_address:
-        #     debug("heartbeat",f"missed_beats: {missed_beats} |  neighbour: {neighbour}" )
-        #debug("heartbeat",f"missed_beats: {missed_beats} |  neighbour: {neighbour}" )
         if neighbour:
             try:
                 tcp_transmit_message('PING', '', neighbour)
@@ -534,13 +526,12 @@ def heartbeat():
                 missed_beats = 0
             if missed_beats > 4:
                 debug("heartbeat", f'{missed_beats} failed pings to neighbour, remove {neighbour}')       
-                # remove the missing peer
                 debug("heartbeat", f"Peers :{peers}")
                 peers.remove(neighbour)
                 debug("heartbeat", f"Peers {peers}")                                   
                 missed_beats = 0 
                 debug("heartbeat", f"Peers {peers}")                                   
-                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
+                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour)) 
                 previous_neighbour = neighbour
                 out_info(f"({previous_neighbour[0]}): Left the Chat")
                 find_neighbour()                                                             
@@ -557,7 +548,7 @@ def heartbeat():
 
 def ping_peers(peer_to_ping=None):
     """
-    :param peer_to_ping: single peer to ping
+    :param peer_to_ping: single peer to ping 
     
     ping_peers: If a specific client is provided, ping that client 
     Otherwise ping all clients or just one
@@ -571,22 +562,18 @@ def ping_peers(peer_to_ping=None):
         try:
             tcp_transmit_message('PING', '', peer)
         except (ConnectionRefusedError, TimeoutError):  
-            # If we can't connect to a peer, then drop it
             debug(f'Failed send to {peer} removeing from list')
             debug(f'Peers: {peers}')
             try:
                 peers.remove(peers)
                 multicast_transmit_message('QUIT', format_join_quit('client', False, peer))
-                # multicast_transmit_message('SERV', f'{client[0]} is unreachable')
             except ValueError:
                 debug("ping_peers", f'{peer} was not in peers')
 
 def multicast_listener():
     """
-    :param group:
-    multicast_listener: Listens for multicasted messages
+    multicast_listener: Listens for multicasted messages and send received messag to command if it doesnt come form self
     """
-    # Create the socket
     m_listener_socket = create_udp_multicast_listener_socket(MG.PEER)
     m_listener_socket.settimeout(2)
 
@@ -611,23 +598,19 @@ def transmit_messages():
     """
     while is_active:
         message = input()
-
         # This clears the just entered message from the chat using escape characters
-        # Basic idea from here:
-        # https://stackoverflow.com/questions/44565704/how-to-clear-only-last-one-line-in-python-output-console
         print(f'\033[A{" " * (len(message))}\033[A')
+        # Print our entered message with color highlighting
         print(f"{bcolors.OKGREEN}({my_address[0]}){bcolors.ENDC}: {message}")
-        # If the flag has been changed while waiting for input, we exit
         if not is_active:
             sys.exit(0)
 
-        # Send message
         if len(message) > BUFFER_SIZE / 10:
             debug("transmit_messages", f'Message is too long {len(message)}')
         elif len(message) == 0:
             continue
         elif message.startswith("cmd:"):
-            # client comand edit
+            # run local cmd command
             command(message, True)
         else:
             debug("transmit_messages", f"message: {message}")
@@ -635,24 +618,24 @@ def transmit_messages():
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
-# The address tuple of this socket is the unique identifier for the leader
 tcp_listener_socket = create_tcp_listener_socket()
-my_address = tcp_listener_socket.getsockname() # to-do: rename to own address or peer_address
+my_address = tcp_listener_socket.getsockname()
 
-# Lists for connected peers
-peers = [my_address]  # Peers list starts with this peer in it
+# Lists for connected peers tarts with self in list
+peers = [my_address]
 
 # Main Function
 if __name__ == '__main__':
-    # Join Peer ring
-    # Broadcast communication
+
     startup_broadcast()
+
     out_info(f"Hello {my_address[0]} Welcome to the Chat")
     out_info(f"Use `cmd:help` for more information")
     if my_address[0] != leader_address[0] and len(peers) == 1:
         out_info(f"Type Your message:")
     else:
         out_info(f"You are alone :(")
+    
     Thread(target=broadcast_listener).start()
 
     # TCP Communication
