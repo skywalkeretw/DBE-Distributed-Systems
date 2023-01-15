@@ -21,7 +21,7 @@ BUFFER_SIZE = 4096
 BROADCAST_CODE = 'mgay2su4peecmsreducv7vaez8ceacnc'
 RESPONSE_CODE = 'xe3uyyqpvtwv234hrgsarcwjkbev8ywy'
 
-# Number of broadcasts made by a server at startup
+# Number of broadcasts made by a peer at startup
 SERVER_BROADCAST_ATTEMPTS = 5
 
 
@@ -136,14 +136,13 @@ def multicast_transmit_message(command, contents='', group=MG.PEER):
     multicast_transmit_message: transmits multicast messages
     """
     if group == MG.PEER:
-        # If there are no other servers, no need to send message
+        # If there are no other peers, no need to send message
         if not (len(peers) - 1):  
             return
-        send_to = 'peers'
     else:
         raise ValueError('Invalid multicast group')
      
-    debug("multicast_transmit_message", f'Sending multicast command {command} send message {contents} to {send_to}')
+    debug("multicast_transmit_message", f'Sending multicast command {command} send message {contents} to peers: {peers}')
 
     m_sender_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     m_sender_socket.settimeout(0.2)
@@ -162,10 +161,11 @@ def tcp_msg_to_peers(command, contents=''):
     
     tcp_msg_to_peers: Sends tcp message to all peers
     """
-    global peers
-    for peers in [p for p in peers if p != my_address]:
+    for target_peer in [p for p in peers if p != my_address]:
         try:
-            tcp_transmit_message(command, contents, peers)
+            debug("tcp_msg_to_peers", f"peers: {peers}")
+            debug("tcp_msg_to_peers", f"target_peers: {peers}")
+            tcp_transmit_message(command, contents, target_peer)
         except (ConnectionRefusedError, TimeoutError):
             print(f'Unable to send to {peers}')
 
@@ -207,7 +207,7 @@ def command(message, cmd=False):
                 print(f"({sender[0]}): {contents}")
             # Add the provided node to this peers list
             # If the request came from the node to be added inform the other peers
-            # send it the server and client lists
+            # send it to the peer lists
             case {'command': 'JOIN', 'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
                 if node_type != 'peer':
                     raise ValueError(f'Tried to add invalid node type: {node_type =}')
@@ -223,8 +223,8 @@ def command(message, cmd=False):
                     peers.append(address)
                     find_neighbour()
 
-            # Remove the provided node to this server's list
-            # If the request came from the node to be removed inform the other servers
+            # Remove the provided node from the peer list
+            # If the request came from the node to be removed inform the other peers
             # If the node is a client, then inform the other clients
             case {'command': 'QUIT',
                     'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
@@ -243,12 +243,15 @@ def command(message, cmd=False):
             # Calls a function to import the current state from the leader
             # This is split of for readability and to keep global overwriting of the lists out of this function
             case {'command': 'STATE', 'contents': state}:
-                # Clear the peers list (except for this server)
+                # Clear the peers list (except for this peer)
                 peers = [my_address]
+                debug("command", f"STATE peers: {peers}")
                 # Add the received list to the peers
-                peers.extend(state["peers"])  
+                peers.extend(state["peers"])
+                debug("command", f"STATE peers: {peers}")
                 #Remove any duplicates from the peers
                 peers = list(set(peers))
+                debug("command", f"STATE peers: {peers}")
                 find_neighbour()
             # Receive a vote in the election
             # If I get a vote for myself then I've won the election. If not, then vote
@@ -283,7 +286,7 @@ def set_leader(address):
 def find_neighbour():
     """
     find_neighbour: Figuring out who is our neighbour 
-    Our neighbour is the server with the next highest address
+    Our neighbour is the peer with the next highest address
     The neighbourus are used for crash fault tolerance and for voting
     """
     global neighbour
@@ -292,6 +295,7 @@ def find_neighbour():
         neighbour = None
         print('I have no neighbour')
         return
+    debug("find_neighbour", f"Peers: {peers}")
     peers.sort()
     index = peers.index(my_address)
     neighbour = peers[0] if index + 1 == length else peers[index + 1]
@@ -379,8 +383,8 @@ def startup_broadcast():
 
     got_response = False
 
-    # 5 attempts are made to find another server
-    # After this, the server assumes it is the only one and considers itself leader
+    # 5 attempts are made to find another leader
+    # After this, the peer assumes it is the only one and considers itself leader
     for i in range(0, SERVER_BROADCAST_ATTEMPTS):
         #Broadcast message looking for a leader
         broadcast_socket.sendto(BROADCAST_CODE.encode(), ('<broadcast>', BROADCAST_PORT))
@@ -427,11 +431,11 @@ def broadcast_listener():
             pass
         else:
             if is_leader and data.startswith(BROADCAST_CODE.encode()):
-                print(f'Received broadcast from {address[0]}, replying with response code')
-                print("Peers: ", peers) # todo: remove when finshed debuging
+                debug("broadcast_listener",f'Received broadcast from {address[0]}, replying with response code')
+                debug("broadcast_listener",f"Peers: {peers}",) # todo: remove when finshed debuging
                 # Respond with the response code, the IP we're responding to, and the the port we're listening with
                 response_message = f'{RESPONSE_CODE}_{address[0]}_{my_address[1]}'
-                print(response_message)
+                debug("broadcast_listener",response_message)
                 listener_socket.sendto(str.encode(response_message), address)
 
     print('Broadcast listener closing')
@@ -480,11 +484,13 @@ def heartbeat():
                 missed_beats = 0
             if missed_beats > 4:                                                             # Once 5 beats have been missed
                 print(f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
-                # remove the missing server
-                peers.remove(neighbour)                                            
+                # remove the missing peer
+                debug("heartbeat", f"Peers :{peers}")
+                peers.remove(neighbour)
+                debug("heartbeat", f"Peers {peers}")                                   
                 missed_beats = 0                                                             # reset the count
                 tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
-                find_neighbour()                                                             # find a new neighbour
+                find_neighbour()                                                             
                 #check if neighbour was leader if the neighbour was leader
                 debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
                 neighbour_was_leader = neighbour == leader_address
@@ -556,7 +562,7 @@ def multicast_listener(group):
 
 def transmit_messages():
     """
-    transmit_message: Function to handle sending messages to the server
+    transmit_message: Function to handle sending messages to the peers
     """
     while is_active:
         message = input('\rYou: ')
@@ -583,12 +589,12 @@ def transmit_messages():
 #-------------------------------------------------------------------------------------------------------
 
 # Create TCP socket for listening to unicast messages
-# The address tuple of this socket is the unique identifier for the server
+# The address tuple of this socket is the unique identifier for the leader
 tcp_listener_socket = create_tcp_listener_socket()
 my_address = tcp_listener_socket.getsockname() # to-do: rename to own address or peer_address
 
-# Lists for connected clients and servers
-peers = [my_address]  # Server list starts with this server in it
+# Lists for connected peers
+peers = [my_address]  # Peers list starts with this peer in it
 
 # Main Function
 if __name__ == '__main__':
