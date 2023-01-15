@@ -8,7 +8,7 @@ import sys
 import ast
 #-------------------------------------------------------------------------------------------------------
 # Set debug mode boolean used by debug function
-debug_active = True
+debug_active = False
 
 # By changing the port numbers, there can be more than one chat on a network
 BROADCAST_PORT = 10001
@@ -38,6 +38,18 @@ neighbour = None
 
 # Flag to enable stopping the system
 is_active = True
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 
 #-------------------------------------------------------------------------------------------------------
 
@@ -167,7 +179,7 @@ def tcp_msg_to_peers(command, contents=''):
             debug("tcp_msg_to_peers", f"target_peers: {peers}")
             tcp_transmit_message(command, contents, target_peer)
         except (ConnectionRefusedError, TimeoutError):
-            print(f'Unable to send to {peers}')
+            debug("tcp_msg_to_peers", f'Unable to send to {peers}')
 
 #-------------------------------------------------------------------------------------------------------
 
@@ -219,7 +231,7 @@ def command(message, cmd=False):
                     multicast_transmit_message('JOIN', format_join_quit(node_type, False, address))            
 
                 if address not in peers:
-                    print(f'Adding {address} to {node_type} list')
+                    debug("not in",f'Adding {address} to {node_type} list')
                     peers.append(address)
                     find_neighbour()
 
@@ -278,12 +290,12 @@ def set_leader(address):
     is_leader = leader_address == my_address
     is_voting = False
     if is_leader:
-        print('I am the leader')
+        debug("set_leader", 'I am the leader')
         multicast_transmit_message('LEAD')
         if neighbour:
             tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbour)
     else:
-        print(f'The leader is {leader_address}')
+        debug("set_leader",f'The leader is {leader_address}')
 
 def find_neighbour():
     """
@@ -295,13 +307,13 @@ def find_neighbour():
     length = len(peers)
     if length == 1:
         neighbour = None
-        print('I have no neighbour')
+        debug("find_neighbour", 'I have no neighbour')
         return
     debug("find_neighbour", f"Peers: {peers}")
     peers.sort()
     index = peers.index(my_address)
     neighbour = peers[0] if index + 1 == length else peers[index + 1]
-    print(f'My neighbour is {neighbour}') 
+    debug("neighbour", f'My neighbour is {neighbour}') 
 
 
 def vote(address):
@@ -334,7 +346,7 @@ def get_ip_address():
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:
-        print("Failed to get IP address")
+        debug("get_ip_address","Failed to get IP address")
     finally:
         s.close()
     return ip
@@ -391,7 +403,7 @@ def startup_broadcast():
     for i in range(0, JOIN_BROADCAST_ATTEMPTS):
         #Broadcast message looking for a leader
         broadcast_socket.sendto(BROADCAST_CODE.encode(), ('<broadcast>', BROADCAST_PORT))
-        print("Looking for Leader")
+        debug("startup_broadcast", "Looking for Leader")
 
         # Wait for a response packet. If no packet has been received in 1 second, broadcast again
         try:
@@ -399,7 +411,7 @@ def startup_broadcast():
             # RandomResponseCode_IPAddressFromLeader
             if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):
                 
-                print("Found Leader at", address[0])
+                debug("startup_broadcast", f"Found Leader at {address[0]}")
                 response_port = int(data.decode().split('_')[2])
                 join_contents = format_join_quit('peer', True, my_address)
                 tcp_transmit_message('JOIN', join_contents, (address[0], response_port))
@@ -411,7 +423,7 @@ def startup_broadcast():
 
     broadcast_socket.close()
     if not got_response:
-        print('No other Leader found')
+        debug("startup_broadcast", 'No other Leader found')
         set_leader(my_address)
 
 def broadcast_listener():
@@ -421,7 +433,7 @@ def broadcast_listener():
     Only the leader responds to broadcasts
     """
     if leader_address[0] == get_ip_address() :
-        print(f'Leader up and running at -> {my_address[0]}:{my_address[1]}')
+        debug("broadcast_listener", f'Leader up and running at -> {my_address[0]}:{my_address[1]}')
 
     listener_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  
     listener_socket.bind(('', BROADCAST_PORT))
@@ -441,7 +453,7 @@ def broadcast_listener():
                 debug("broadcast_listener",response_message)
                 listener_socket.sendto(str.encode(response_message), address)
 
-    print('Broadcast listener closing')
+    debug("broadcast_listener", 'Broadcast listener closing')
     listener_socket.close()
     sys.exit(0)
 
@@ -463,7 +475,7 @@ def tcp_listener():
                 print(f'Command {message["command"]} received from {message["sender"]}')
             command(message)
 
-    print('Unicast listener closing')
+    debug("tcp_listener", 'Unicast listener closing')
     tcp_listener_socket.close()
 
 def heartbeat():
@@ -485,7 +497,7 @@ def heartbeat():
                 missed_beats += 1
             else:
                 missed_beats = 0
-            if missed_beats > 4:                                                             # Once 5 beats have been missed
+            if missed_beats > 4:                                                                          # Once 5 beats have been missed
                 debug("heartbeat", f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
                 # remove the missing peer
                 debug("heartbeat", f"Peers :{peers}")
@@ -504,7 +516,7 @@ def heartbeat():
                     debug("heartbeat",'Previous neighbour was leader, starting election')                 # print to console
                     vote(my_address)                                                          # start an election
 
-    print('Heartbeat thread closing')
+    debug("heartbeat", 'Heartbeat thread closing')
     sys.exit(0)
 
 def ping_peers(peer_to_ping=None):
@@ -531,7 +543,7 @@ def ping_peers(peer_to_ping=None):
                 multicast_transmit_message('QUIT', format_join_quit('client', False, peer))
                 # multicast_transmit_message('SERV', f'{client[0]} is unreachable')
             except ValueError:
-                print(f'{peer} was not in peers')
+                debug("ping_peers", f'{peer} was not in peers')
 
 def multicast_listener():
     """
@@ -553,7 +565,7 @@ def multicast_listener():
                 message = decode_message(data)
                 command(message)
 
-    print(f'Multicast listener peer closing')
+    debug("multicast_listener", f'Multicast listener peer closing')
     m_listener_socket.close()
     sys.exit(0)
 
@@ -562,13 +574,13 @@ def transmit_messages():
     transmit_message: Function to handle sending messages to the peers
     """
     while is_active:
-        message = input('\rYou: ')
+        message = input()
 
         # This clears the just entered message from the chat using escape characters
         # Basic idea from here:
         # https://stackoverflow.com/questions/44565704/how-to-clear-only-last-one-line-in-python-output-console
-        print(f'\033[A{" " * (len("You: " + message))}\033[A')
-
+        print(f'\033[A{" " * (len(message))}\033[A')
+        print(f"{bcolors.OKGREEN}({my_address[0]}){bcolors.ENDC}: {message}")
         # If the flag has been changed while waiting for input, we exit
         if not is_active:
             sys.exit(0)
