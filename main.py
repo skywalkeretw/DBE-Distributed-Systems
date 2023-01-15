@@ -253,64 +253,67 @@ def command(message, cmd=False):
             out_cmd(f"Your command is invalid. Use 1 of the following Commands:")
             info_help()
     else:
-        match message:
-            case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
-                # Print message form other peers
-                print(f"({sender[0]}): {contents}")
+        
+        command = message['command']
+        contents = message['contents']
+        if  command == 'CHAT':
+            # Print message form other peers
+            sender = message['sender']
+            print(f"({sender[0]}): {contents}")
+        elif command == 'JOIN':
+            # Add the provided node to this peers list
+            # If the request came from the node to be added inform the other peers
+            # send it to the peer lists
+            inform_others, address = contents['inform_others'], contents['address']
+            if inform_others:
+                tcp_transmit_message('STATE', {'peers': peers}, address)   
+                # inform Peers about new Peer
+                multicast_transmit_message('JOIN', format_join_quit(False, address))                     
 
-            case {'command': 'JOIN', 'contents': {'inform_others': inform_others, 'address': address}}:
-                # Add the provided node to this peers list
-                # If the request came from the node to be added inform the other peers
-                # send it to the peer lists
-                if inform_others:
-                    tcp_transmit_message('STATE', {'peers': peers}, address)  
-                    # inform Peers about new Peer
-                    multicast_transmit_message('JOIN', format_join_quit(False, address))            
-
-                if address not in peers:
-                    debug("not in",f'Adding {address} to {peers}')
-                    out_info(f"({address[0]}): Hello I Joined the Chat")
-                    peers.append(address)
-                    find_neighbour()
-
-            case {'command': 'QUIT', 'contents': {'inform_others': inform_others, 'address': address}}:
-                # Remove the provided node from the peer list
-                # If the request came from the node to be removed inform the other peers
-                if inform_others:
-                    multicast_transmit_message('QUIT', format_join_quit(False, address))
-                try:
-                    debug("command", f'Removing {address} from {peers}')
-                    out_info(f"({address[0]}): Left the Chat")
-                    peers.remove(address)
-                    find_neighbour()
-                except ValueError:
-                    debug("command", f'{address} was not in {peers}')
-
-            case {'command': 'STATE', 'contents': state}:
-                # Clear the peers list (except for this peer)
-                peers = [my_address]
-                debug("command", f"STATE peers: {peers}")
-                # Add the received list to the peers
-                peers.extend(state["peers"])
-                debug("command", f"STATE peers: {peers}")
-                # Remove any duplicates from the peers
-                peers = list(set(peers))
-                debug("command", f"STATE peers: {peers}")
+            if address not in peers:
+                debug("not in",f'Adding {address} to {peers}')
+                out_info(f"({address[0]}): Hello I Joined the Chat")
+                peers.append(address)
                 find_neighbour()
-
-            case {'command': 'VOTE', 'contents': {'vote_for': address, 'leader_elected': leader_elected}}:
-                # Receive a vote in the election
-                # If I get a vote for myself then I've won the election. If not, then vote
-                if not leader_elected:
-                    if address == my_address:
-                        set_leader(my_address)
-                    else:
-                        vote(address)
+        elif command == 'QUIT':
+            # Remove the provided node from the peer list
+            # If the request came from the node to be removed inform the other peers
+            inform_others, address = contents['inform_others'], contents['address']
+            if inform_others:
+                multicast_transmit_message('QUIT', format_join_quit(False, address))
+            try:
+                debug("command", f'Removing {address} from {peers}')
+                out_info(f"({address[0]}): Left the Chat")
+                peers.remove(address)
+                find_neighbour()
+            except ValueError:
+                debug("command", f'{address} was not in {peers}')
+        elif command == 'STATE':
+            state = contents
+            # Clear the peers list (except for this peer)
+            peers = [my_address]
+            debug("command", f"STATE peers: {peers}")
+            # Add the received list to the peers
+            peers.extend(state["peers"])
+            debug("command", f"STATE peers: {peers}")
+            # Remove any duplicates from the peers
+            peers = list(set(peers))
+            debug("command", f"STATE peers: {peers}")
+            find_neighbour()
+        elif command == 'VOTE':
+            # Receive a vote in the election
+            # If I get a vote for myself then I've won the election. If not, then vote
+            address, leader_elected = contents['vote_for'], contents['leader_elected']
+            if not leader_elected:
+                if address == my_address:
+                    set_leader(my_address)
                 else:
-                    if address != my_address:
-                        set_leader(address)
-                        tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
-
+                    vote(address)
+            else:
+                if address != my_address:
+                    set_leader(address)
+                    tcp_transmit_message('VOTE', {'vote_for': address, 'leader_elected': True}, neighbour)
+        
 def set_leader(address):
     """
     :param address: Leader Address
@@ -410,7 +413,8 @@ def decode_message(message):
 
     decode_message: decodes a encoded binary dict and returns it
     """
-    return ast.literal_eval(message.decode())
+    msg = message.decode()
+    return ast.literal_eval(msg)
 
 def format_join_quit(inform_others, address):
     """
@@ -442,11 +446,11 @@ def startup_broadcast():
         # Wait for a response packet. If no packet has been received in 1 second, broadcast again
         try:
             data, address = broadcast_socket.recvfrom(BUFFER_SIZE)
-            debug("startup_broadcast", f"data{decode_message(data)}")
-            if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):
+            debug("startup_broadcast", f"data: {data.decode()}")
+            if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):                
                 debug("startup_broadcast", f"Found Leader at {address[0]}")
                 response_port = int(data.decode().split('_')[2])
-                join_contents = format_join_quit('peer', True, my_address)
+                join_contents = format_join_quit(True, my_address)
                 tcp_transmit_message('JOIN', join_contents, (address[0], response_port))
                 got_response = True
                 set_leader((address[0], response_port))
@@ -531,7 +535,7 @@ def heartbeat():
                 debug("heartbeat", f"Peers {peers}")                                   
                 missed_beats = 0 
                 debug("heartbeat", f"Peers {peers}")                                   
-                tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour)) 
+                tcp_msg_to_peers('QUIT', format_join_quit(False, neighbour)) 
                 previous_neighbour = neighbour
                 out_info(f"({previous_neighbour[0]}): Left the Chat")
                 find_neighbour()                                                             
@@ -566,7 +570,7 @@ def ping_peers(peer_to_ping=None):
             debug(f'Peers: {peers}')
             try:
                 peers.remove(peers)
-                multicast_transmit_message('QUIT', format_join_quit('client', False, peer))
+                multicast_transmit_message('QUIT', format_join_quit(False, peer))
             except ValueError:
                 debug("ping_peers", f'{peer} was not in peers')
 
