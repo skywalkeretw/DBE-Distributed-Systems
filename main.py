@@ -365,6 +365,9 @@ def decode_message(message):
 
 def format_join_quit(node_type, inform_others, address):
     """
+    :param node_type:
+    
+    
     format_join_quit returns 
     """
     return {'node_type': node_type, 'inform_others': inform_others, 'address': address}
@@ -491,11 +494,12 @@ def heartbeat():
                 missed_beats = 0 
                 debug("heartbeat", f"Peers {peers}")                                   
                 tcp_msg_to_peers('QUIT', format_join_quit('peer', False, neighbour))         # inform the others
-                # find_neighbour()                                                             
+                previous_neighbour = neighbour
+                find_neighbour()                                                             
                 #check if neighbour was leader if the neighbour was leader
                 debug("heartbeat", f"neighbour: {neighbour} leader_address: {leader_address}")
-                neighbour_was_leader = neighbour == leader_address
-                debug("heartbeat", f"{neighbour_was_leader}")
+                neighbour_was_leader = previous_neighbour == leader_address
+                debug("heartbeat", f"neighbour_was_leader: {neighbour_was_leader} previous_neighbour: {previous_neighbour}")
                 if neighbour_was_leader or not neighbour:                                                  
                     debug("heartbeat",'Previous neighbour was leader, starting election')                 # print to console
                     vote(my_address)                                                          # start an election
@@ -529,11 +533,10 @@ def ping_peers(peer_to_ping=None):
             except ValueError:
                 print(f'{peer} was not in peers')
 
-# Listens for multicasted messages
 def multicast_listener(group):
     """
     :param group:
-    multicast_listener:
+    multicast_listener: Listens for multicasted messages
     """
     #todo: match check if client is ok
     if group == MG.PEER:
