@@ -131,7 +131,7 @@ def multicast_transmit_message(command, contents='', group=MG.PEER):
     """
     :param command: Action that should be executed (CHAT, JOIN, PING...)
     :param contents: Data to be sent
-    :param address: Address tupple to send the message to the Multicast Group
+    :param group:                   Address tupple to send the message to the Multicast Group
 
     multicast_transmit_message: transmits multicast messages
     """
@@ -269,6 +269,8 @@ def command(message, cmd=False):
 
 def set_leader(address):
     """
+    :param address:
+
     set_leader: 
     """
     global leader_address, is_leader, is_voting
@@ -323,7 +325,7 @@ def vote(address):
 
 def get_ip_address():
     """
-    :return Comuters IP address
+    :return Computers IP address
     
     get_ip_address Returns the IP address of the System
     """
@@ -336,13 +338,6 @@ def get_ip_address():
     finally:
         s.close()
     return ip
-
-
-def parse_multicast(message, group):
-    if group == MG.PEER:
-        command(message)
-    else:
-        raise ValueError(f'Invalid multicast group, {group =}')
         
 #-------------------------------------------------------------------------------------------------------        
 
@@ -350,6 +345,10 @@ def parse_multicast(message, group):
 
 def encode_message(command, sender, contents=''):
     """
+    :param command:
+    :param sender:
+    :param contents:
+
     encode_message
     """
     message_dict = {'command': command, 'sender': sender, 'contents': contents}
@@ -366,7 +365,8 @@ def decode_message(message):
 def format_join_quit(node_type, inform_others, address):
     """
     :param node_type:
-    
+    :param inform_others:
+    :param address:
     
     format_join_quit returns 
     """
@@ -533,19 +533,13 @@ def ping_peers(peer_to_ping=None):
             except ValueError:
                 print(f'{peer} was not in peers')
 
-def multicast_listener(group):
+def multicast_listener():
     """
     :param group:
     multicast_listener: Listens for multicasted messages
     """
-    #todo: match check if client is ok
-    if group == MG.PEER:
-            name = 'peer'
-    else:
-        raise ValueError('Invalid multicast group')
-
     # Create the socket
-    m_listener_socket = create_udp_multicast_listener_socket(group)
+    m_listener_socket = create_udp_multicast_listener_socket(MG.PEER)
     m_listener_socket.settimeout(2)
 
     while is_active:
@@ -558,9 +552,8 @@ def multicast_listener(group):
             if address[0] != my_address[0]:
                 message = decode_message(data)
                 command(message)
-                parse_multicast(message, group)
 
-    print(f'Multicast listener {name} closing')
+    print(f'Multicast listener peer closing')
     m_listener_socket.close()
     sys.exit(0)
 
@@ -582,13 +575,14 @@ def transmit_messages():
 
         # Send message
         if len(message) > BUFFER_SIZE / 10:
-            print('Message is too long')
+            debug("transmit_messages", f'Message is too long {len(message)}')
         elif len(message) == 0:
             continue
         elif message.startswith("cmd:"):
             # client comand edit
             command(message, True)
         else:
+            debug("transmit_messages", f"message: {message}")
             multicast_transmit_message('CHAT', message)
 #-------------------------------------------------------------------------------------------------------
 
@@ -603,13 +597,16 @@ peers = [my_address]  # Peers list starts with this peer in it
 # Main Function
 if __name__ == '__main__':
     # Join Peer ring
+    # Broadcast communication
     startup_broadcast()
     Thread(target=broadcast_listener).start()
 
+    # TCP Communication
     Thread(target=tcp_listener).start()
     Thread(target=heartbeat).start()
 
-    Thread(target=multicast_listener, args=(MG.PEER,)).start()
+    # Message Multicast communication
+    Thread(target=multicast_listener).start()
     Thread(target=transmit_messages).start()
 
 #-------------------------------------------------------------------------------------------------------
