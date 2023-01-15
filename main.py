@@ -410,7 +410,8 @@ def decode_message(message):
 
     decode_message: decodes a encoded binary dict and returns it
     """
-    return ast.literal_eval(message.decode())
+    msg = message.decode()
+    return ast.literal_eval(msg)
 
 def format_join_quit(inform_others, address):
     """
@@ -442,7 +443,7 @@ def startup_broadcast():
         # Wait for a response packet. If no packet has been received in 1 second, broadcast again
         try:
             data, address = broadcast_socket.recvfrom(BUFFER_SIZE)
-            debug("startup_broadcast", f"data{decode_message(data)}")
+            debug("startup_broadcast", f"data: {data.decode()}")
             if data.startswith(f'{RESPONSE_CODE}_{my_address[0]}'.encode()):                
                 debug("startup_broadcast", f"Found Leader at {address[0]}")
                 response_port = int(data.decode().split('_')[2])
@@ -586,6 +587,7 @@ def multicast_listener():
             debug("multicast_listener", f"address: {address} my_address {my_address}")
             if address[0] != my_address[0]:
                 message = decode_message(data)
+                print(message)
                 command(message)
 
     debug("multicast_listener", f'Multicast listener peer closing')
