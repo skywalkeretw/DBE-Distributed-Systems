@@ -233,7 +233,7 @@ def command(message, cmd=False):
         elif cmd == "clear":
             clear_console()
         elif cmd == "neighbour":
-            out_cmd(f"Your Neighbour: {find_neighbour()}")
+            out_cmd(f"Your Neighbour: {neighbour}")
         elif cmd == "is_leader":
             out_cmd(f"You are Leader" if is_leader else f"You are Participant")
         elif cmd == "peers":
