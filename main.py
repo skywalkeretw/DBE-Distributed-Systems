@@ -79,11 +79,20 @@ def out_cmd(msg):
     """ 
     print(f"{bcolors.OKBLUE}> {msg}{bcolors.ENDC}")
 
+def out_info(msg):
+    """
+    :param msg: Message that should be Printed
+
+    out_cmd: prints a message in specfic color
+    """ 
+    print(f"{bcolors.OKCYAN}{msg}{bcolors.ENDC}")
+
+
 def info_help():
     """
     info_help: prints the valid user commands
     """
-    out_cmd("cmd:clear => Clear the Console")
+    out_cmd("cmd:clear => Clears the Console")
     out_cmd("cmd:ip => Shows you your IP Address")
     out_cmd("cmd:ports => Get Broadcast Port and Multicast Port")
     out_cmd("cmd:neighbour => Shows you your neighbour")
@@ -254,6 +263,7 @@ def command(message, cmd=False):
 
                 if address not in peers:
                     debug("not in",f'Adding {address} to {node_type} list')
+                    out_info(f"({address[0]}): Hello I Joined the Chat")
                     peers.append(address)
                     find_neighbour()
 
@@ -633,6 +643,12 @@ if __name__ == '__main__':
     # Join Peer ring
     # Broadcast communication
     startup_broadcast()
+    out_info(f"Hello {my_address[0]} Welcome to the Chat")
+    out_info(f"Use `cmd:help` for more information")
+    if my_address[0] != leader_address[0] and len(peers) == 1:
+        out_info(f"Type Your message:")
+    else:
+        out_info(f"You are alone :(")
     Thread(target=broadcast_listener).start()
 
     # TCP Communication
