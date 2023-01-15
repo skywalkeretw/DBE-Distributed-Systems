@@ -24,7 +24,6 @@ RESPONSE_CODE = 'xe3uyyqpvtwv234hrgsarcwjkbev8ywy'
 # Number of broadcasts made by a peer at startup
 JOIN_BROADCAST_ATTEMPTS = 5
 
-
 # Addresses for multicast group
 # Block 224.3.0.64-224.3.255.255 is all unassigned
 class MG:
@@ -40,6 +39,9 @@ neighbour = None
 is_active = True
 
 class bcolors:
+    """
+    bcolors Class containing color codes
+    """
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
     OKCYAN = '\033[96m'
@@ -99,6 +101,8 @@ def info_help():
     out_cmd("cmd:neighbour => Shows you your neighbour")
     out_cmd("cmd:is_leader => Shows you if you are a leader or a participant")
     out_cmd("cmd:toggle_debug => Activates the debug mode")
+    out_cmd("cmd:quit => Leave the chat")
+    
     
 #-------------------------------------------------------------------------------------------------------
 
@@ -106,7 +110,7 @@ def info_help():
 
 def create_udp_broadcast_listener_socket(timeout=None):
     """
-    :param timeout: Set a timeout for the 
+    :param timeout: Set a timeout  
     
     :return UDP socket
     
@@ -166,14 +170,28 @@ def tcp_transmit_message(command, contents, address):
     transmit_socket.send(message_bytes)
     transmit_socket.close()
 
+def tcp_msg_to_peers(command, contents=''):
+    """
+    :param command: Action that should be executed (CHAT, JOIN, PING...)
+    :param contents: Data to be sent
+    
+    tcp_msg_to_peers: Sends tcp message to all peers except self
+    """
+    for target_peer in [p for p in peers if p != my_address]:
+        try:
+            debug("tcp_msg_to_peers", f"peers: {peers}")
+            debug("tcp_msg_to_peers", f"target_peers: {peers}")
+            tcp_transmit_message(command, contents, target_peer)
+        except (ConnectionRefusedError, TimeoutError):
+            debug("tcp_msg_to_peers", f'Unable to send to {peers}')
 
 def multicast_transmit_message(command, contents='', group=MG.PEER):
     """
     :param command: Action that should be executed (CHAT, JOIN, PING...)
     :param contents: Data to be sent
-    :param group:                   Address tupple to send the message to the Multicast Group
+    :param group: Address tupple to send the message to the Multicast Group
 
-    multicast_transmit_message: transmits multicast messages
+    multicast_transmit_message: transmits multicast messages to group
     """
     if group == MG.PEER:
         # If there are no other peers, no need to send message
@@ -182,7 +200,7 @@ def multicast_transmit_message(command, contents='', group=MG.PEER):
     else:
         raise ValueError('Invalid multicast group')
      
-    debug("multicast_transmit_message", f'Sending multicast command {command} send message {contents} to peers: {peers}')
+    debug("multicast_transmit_message", f'Sending multicast command {command} send message {contents} to peers: {peers} group {group}')
 
     m_sender_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     m_sender_socket.settimeout(0.2)
@@ -194,33 +212,18 @@ def multicast_transmit_message(command, contents='', group=MG.PEER):
     finally:
         m_sender_socket.close()
 
-def tcp_msg_to_peers(command, contents=''):
-    """
-    :param command: Action that should be executed (CHAT, JOIN, PING...)
-    :param contents: Data to be sent
-    
-    tcp_msg_to_peers: Sends tcp message to all peers
-    """
-    for target_peer in [p for p in peers if p != my_address]:
-        try:
-            debug("tcp_msg_to_peers", f"peers: {peers}")
-            debug("tcp_msg_to_peers", f"target_peers: {peers}")
-            tcp_transmit_message(command, contents, target_peer)
-        except (ConnectionRefusedError, TimeoutError):
-            debug("tcp_msg_to_peers", f'Unable to send to {peers}')
-
 #-------------------------------------------------------------------------------------------------------
 
 # Command Function
 
 def command(message, cmd=False):
     """
-    :param message:
-    :param cmd:
+    :param message: Data to be used for comands
+    :param cmd: Flag to identify if it is a console command
 
-    command: Run diffrent commands depending on the 
+    command: Run diffrent commands depending on the message and flag
     """
-    global peers
+    global peers, is_active
     if cmd:
         cmd = message.split(":")[1]
         if cmd == "ip":
@@ -235,6 +238,9 @@ def command(message, cmd=False):
             out_cmd(f"You are Leader" if is_leader else f"You are Participant")
         elif cmd == "peers":
             out_cmd(f"List of peers: {peers}")
+        elif cmd == "quit":
+            is_active = False
+            out_cmd("You left the Chat")
         elif cmd == "toggle_debug":
             global debug_active
             debug_active = not debug_active
@@ -248,24 +254,22 @@ def command(message, cmd=False):
             info_help()
     else:
         match message:
-
             case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
+                # Print message form other peers
                 print(f"({sender[0]}): {contents}")
-            # Add the provided node to this peers list
-            # If the request came from the node to be added inform the other peers
-            # send it to the peer lists
-            case {'command': 'JOIN', 'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-                if node_type != 'peer':
-                    raise ValueError(f'Tried to add invalid node type: {node_type =}')
+            case {'command': 'JOIN', 'contents': {'inform_others': inform_others, 'address': address}}:
+                # Add the provided node to this peers list
+                # If the request came from the node to be added inform the other peers
+                # send it to the peer lists
 
                 if inform_others:
                     # return Peer list
                     tcp_transmit_message('STATE', {'peers': peers}, address)  
                     # inform Peers about new Peer
-                    multicast_transmit_message('JOIN', format_join_quit(node_type, False, address))            
+                    multicast_transmit_message('JOIN', format_join_quit( False, address))            
 
                 if address not in peers:
-                    debug("not in",f'Adding {address} to {node_type} list')
+                    debug("not in",f'Adding {address} to {peers}')
                     out_info(f"({address[0]}): Hello I Joined the Chat")
                     peers.append(address)
                     find_neighbour()
@@ -273,20 +277,17 @@ def command(message, cmd=False):
             # Remove the provided node from the peer list
             # If the request came from the node to be removed inform the other peers
             # If the node is a client, then inform the other clients
-            case {'command': 'QUIT', 'contents': {'node_type': node_type, 'inform_others': inform_others, 'address': address}}:
-                if node_type != 'peer':
-                    raise ValueError(f'Tried to remove invalid node type: {node_type =}')
-
+            case {'command': 'QUIT', 'contents': {'inform_others': inform_others, 'address': address}}:
                 if inform_others:
-                    multicast_transmit_message('QUIT', format_join_quit(node_type, False, address))
+                    multicast_transmit_message('QUIT', format_join_quit(False, address))
                 try:
-                    debug("command", f'Removing {address} from {node_type} list')
+                    debug("command", f'Removing {address} from {peers}')
                     out_info(f"({address[0]}): Left the Chat")
                     peers.remove(address)
                     find_neighbour()
                         
                 except ValueError:
-                    debug("command", f'{address} was not in {node_type} list')
+                    debug("command", f'{address} was not in {peers}')
             # Calls a function to import the current state from the leader
             # This is split of for readability and to keep global overwriting of the lists out of this function
             case {'command': 'STATE', 'contents': state}:
@@ -409,15 +410,14 @@ def decode_message(message):
     """
     return ast.literal_eval(message.decode())
 
-def format_join_quit(node_type, inform_others, address):
+def format_join_quit(inform_others, address):
     """
-    :param node_type:
     :param inform_others:
     :param address:
     
     format_join_quit returns 
     """
-    return {'node_type': node_type, 'inform_others': inform_others, 'address': address}
+    return {'inform_others': inform_others, 'address': address}
 
 #-------------------------------------------------------------------------------------------------------
 
