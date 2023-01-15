@@ -69,9 +69,27 @@ def debug(func, msg):
     debug: prints a message out if the debug_active variable is set to True
     """ 
     if debug_active:
-        print("Debug: ", func, " -> ", msg)
+        print(f"{bcolors.WARNING}Debug:{bcolors.ENDC} ", func, " -> ", msg)
 
+def out_cmd(msg):
+    """
+    :param msg: Message that should be Printed
 
+    out_cmd: prints a message in specfic color
+    """ 
+    print(f"{bcolors.OKBLUE}> {msg}{bcolors.ENDC}")
+
+def info_help():
+    """
+    info_help: prints the valid user commands
+    """
+    out_cmd("cmd:clear => Clear the Console")
+    out_cmd("cmd:ip => Shows you your IP Address")
+    out_cmd("cmd:ports => Get Broadcast Port and Multicast Port")
+    out_cmd("cmd:neighbour => Shows you your neighbour")
+    out_cmd("cmd:is_leader => Shows you if you are a leader or a participant")
+    out_cmd("cmd:toggle_debug => Activates the debug mode")
+    
 #-------------------------------------------------------------------------------------------------------
 
 # Socket Listener
@@ -196,25 +214,29 @@ def command(message, cmd=False):
     if cmd:
         cmd = message.split(":")[1]
         if cmd == "ip":
-            print("> ", f"Your IP: {get_ip_address()}")
+            out_cmd(f"Your IP: {get_ip_address()}")
         elif cmd == "ports":
-            print(f"> Broadcast Port: {BROADCAST_PORT},  Multicast Port: {MULTICAST_PORT}")
+            out_cmd(f"Broadcast Port: {BROADCAST_PORT},  Multicast Port: {MULTICAST_PORT}")
         elif cmd == "clear":
             clear_console()
         elif cmd == "neighbour":
-            print("> ", find_neighbour())
+            out_cmd(f"Your Neighbour: {find_neighbour()}")
         elif cmd == "is_leader":
-            if is_leader:
-                print(f"> You are Leader")
-            else:
-                print(f"> You are Participant") 
+            out_cmd(f"You are Leader" if is_leader else f"You are Participant")
         elif cmd == "toggle_debug":
-            global debug
+            global debug_active
             debug_active = not debug_active
-            print(f"> debug is: {'active' if debug_active else 'disabled'}")
+            out_cmd(f"debug is: {'active' if debug_active else 'disabled'}")
+        elif cmd == "debug":
+            out_cmd(f"debug is: {'active' if debug_active else 'disabled'}")
+        elif cmd == "help":
+            info_help()
+        else:
+            out_cmd(f"Your command is invalid. Use 1 of the following Commands:")
+            info_help()
     else:
         match message:
-            # When a chat message is received print it
+
             case {'command': 'CHAT', 'sender': sender, 'contents': contents}:
                 print(f"({sender[0]}): {contents}")
             # Add the provided node to this peers list
@@ -246,12 +268,12 @@ def command(message, cmd=False):
                 if inform_others:
                     multicast_transmit_message('QUIT', format_join_quit(node_type, False, address))
                 try:
-                    print(f'Removing {address} from {node_type} list')
+                    debug("command", f'Removing {address} from {node_type} list')
                     peers.remove(address)
                     find_neighbour()
                         
                 except ValueError:
-                    print(f'{address} was not in {node_type} list')
+                    debug("command", f'{address} was not in {node_type} list')
             # Calls a function to import the current state from the leader
             # This is split of for readability and to keep global overwriting of the lists out of this function
             case {'command': 'STATE', 'contents': state}:
@@ -471,8 +493,8 @@ def tcp_listener():
             pass
         else:
             message = decode_message(client.recv(BUFFER_SIZE))
-            if message['command'] != 'PING':  # We don't print pings since that would be a lot
-                print(f'Command {message["command"]} received from {message["sender"]}')
+            if message['command'] != 'PING':
+                debug("tcp_listener",f'Command {message["command"]} received from {message["sender"]}')
             command(message)
 
     debug("tcp_listener", 'Unicast listener closing')
@@ -497,8 +519,8 @@ def heartbeat():
                 missed_beats += 1
             else:
                 missed_beats = 0
-            if missed_beats > 4:                                                                          # Once 5 beats have been missed
-                debug("heartbeat", f'{missed_beats} failed pings to neighbour, remove {neighbour}')       # print to console
+            if missed_beats > 4:
+                debug("heartbeat", f'{missed_beats} failed pings to neighbour, remove {neighbour}')       
                 # remove the missing peer
                 debug("heartbeat", f"Peers :{peers}")
                 peers.remove(neighbour)
@@ -513,8 +535,8 @@ def heartbeat():
                 neighbour_was_leader = previous_neighbour == leader_address
                 debug("heartbeat", f"neighbour_was_leader: {neighbour_was_leader} previous_neighbour: {previous_neighbour}")
                 if neighbour_was_leader or not neighbour:                                                  
-                    debug("heartbeat",'Previous neighbour was leader, starting election')                 # print to console
-                    vote(my_address)                                                          # start an election
+                    debug("heartbeat",'Previous neighbour was leader, starting election')
+                    vote(my_address)
 
     debug("heartbeat", 'Heartbeat thread closing')
     sys.exit(0)
