@@ -327,7 +327,6 @@ def set_leader(address):
     is_voting = False
     if is_leader:
         debug("set_leader", 'I am the leader')
-        multicast_transmit_message('LEAD')
         if neighbour:
             tcp_transmit_message('VOTE', {'vote_for': my_address, 'leader_elected': True}, neighbour)
     else:
