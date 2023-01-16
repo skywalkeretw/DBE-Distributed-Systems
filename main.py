@@ -279,8 +279,6 @@ def command(message, cmd=False):
             # Remove the provided node from the peer list
             # If the request came from the node to be removed inform the other peers
             inform_others, address = contents['inform_others'], contents['address']
-            if inform_others:
-                multicast_transmit_message('QUIT', format_join_quit(False, address))
             try:
                 debug("command", f'Removing {address} from {peers}')
                 out_info(f"({address[0]}): Left the Chat")
