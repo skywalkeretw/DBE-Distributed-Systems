@@ -8,4 +8,4 @@ Run the system
     python3 main.py
 ```
 
-[Demo Video](https://github.com/skywalkeretw/DBE-Distributed-Systems/blob/master/media/Demo_video.mov)
+[Demo Video](https://github.com/skywalkeretw/DBE-Distributed-Systems/blob/master/media/Demo_video.mp4)
